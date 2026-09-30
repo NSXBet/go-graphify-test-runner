@@ -32,7 +32,7 @@ Catches:  `ChangedFiles` returning paths in nondeterministic map order (so the
           from the reported set.
 Produces: internal/repo/repo_test.go
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 b47008a (negate a condition)
 
 ## Phase 3: Graph lookups and evidence cap
 
