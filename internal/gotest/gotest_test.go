@@ -22,18 +22,23 @@ func helper() {}
 func (s S) TestM(t *testing.T) {}
 `
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(src), 0o644); err != nil {
+
+	if err := os.WriteFile(filepath.Join(dir, "x_test.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
+
 	funcs, err := Funcs(dir, "x_test.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+
+	names := make([]string, 0, len(funcs))
 	for _, f := range funcs {
 		names = append(names, f.Name)
 	}
+
 	sort.Strings(names)
+
 	want := []string{"Test", "TestA", "Test_b"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("got %v want %v", names, want)

@@ -34,9 +34,11 @@ diff --git a/README.md b/README.md
 		"pkg/a.go":   {{10, 12}, {23, 23}, {31, 31}},
 		"pkg/old.go": nil,
 	}
+
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v want %v", got, want)
 	}
+
 	if _, ok := got["README.md"]; ok {
 		t.Fatalf("non-Go file kept")
 	}

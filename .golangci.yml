@@ -1,0 +1,361 @@
+# managed by Shared/Engineering/Standards/Go — do not diverge without PR
+# canonical source: Shared/Engineering/Standards/Go/golangci.yaml in the NSX Obsidian vault
+# commit as .golangci.yml at your Go repo's root. Stricter extensions are fine, weaker overrides are not.
+
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+  issues-exit-code: 1
+
+linters:
+  default: none
+  enable:
+    # --- Core correctness
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # --- Bug catchers
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - fatcontext
+    - forcetypeassert
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - intrange
+    - iotamixing
+    - makezero
+    - musttag
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - predeclared
+    - protogetter
+    - reassign
+    - recvcheck
+    - rowserrcheck
+    - spancheck
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+
+    # --- Concurrency
+    - contextcheck
+
+    # --- Security
+    - gosec
+
+    # --- Performance
+    - perfsprint
+    - prealloc
+    - mirror
+
+    # --- Style / review
+    - revive
+    - gocritic
+    - misspell
+    - whitespace
+    - wsl_v5   # uniform whitespace / cuddling
+
+    # --- Complexity
+    - cyclop
+    - funlen
+    - gocognit
+    - nestif
+
+    # --- Imports / dependencies
+    - depguard
+    - gomoddirectives
+    - importas
+
+    # --- Globals / init (path-excluded for fx.go and cmd/)
+    - gochecknoglobals
+    - gochecknoinits
+
+    # --- Documentation quality
+    - godoclint
+    - godot
+
+    # --- Magic numbers
+    - mnd
+
+    # --- Testing
+    - testifylint
+    - thelper
+    - tparallel
+    - usetesting
+
+    # --- Logger key-value correctness (zap/zerolog/logr/klog)
+    - loggercheck
+
+    # --- stdlib-over-exp
+    - exptostd
+
+    # --- Modernization (Go 1.22+ idioms)
+    - modernize
+
+    # --- Forbid specific identifiers (binding rules 1, 2, 7)
+    - forbidigo
+
+    # --- Lint the lint directives themselves
+    - nolintlint
+
+  settings:
+    cyclop:
+      max-complexity: 15
+      package-average: 10.0
+
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          deny:
+            # Deprecated / superseded
+            - pkg: "io/ioutil"
+              desc: "io/ioutil is deprecated; use io and os directly"
+            - pkg: "github.com/satori/go.uuid"
+              desc: "use github.com/google/uuid instead"
+            - pkg: "github.com/golang/protobuf"
+              desc: "use google.golang.org/protobuf instead"
+            - pkg: "golang.org/x/exp/slices"
+              desc: "use stdlib slices (Go 1.21+)"
+            - pkg: "golang.org/x/exp/maps"
+              desc: "use stdlib maps (Go 1.21+)"
+            - pkg: "math/rand$"
+              desc: "use math/rand/v2"
+            # NSF paved-road enforcement
+            - pkg: "github.com/prometheus/client_golang/prometheus/promauto"
+              desc: "promauto is disallowed — it couples registration to the global default registry, breaking per-tenant registries and testing. Use NSF metricx (ideally via nsx-gen-generated metrics)."
+        non-main:
+          files:
+            - "!**/main.go"
+            - "!**/cmd/**"
+          deny:
+            - pkg: "log$"
+              desc: "stdlib log is disallowed — use NSF logx (Zap-backed; adds NSX schema + OTel trace linkage + configurable redaction). Inject logx.Logger via FX, or use logx.Info(ctx, ...) / logx.GetFromCtx(ctx)."
+            - pkg: "log/slog$"
+              desc: "stdlib slog is disallowed — NSF uses Zap-backed logx, not slog. Inject logx.Logger via FX, or use logx.Info(ctx, ...) / logx.GetFromCtx(ctx)."
+
+    errcheck:
+      # Rule 6: no silently-discarded errors.
+      check-blank: true              # flags `_ = fn()` on functions returning error
+      check-type-assertions: true    # flags `x, _ := y.(T)`
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (net/http.ResponseWriter).Write
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+    forbidigo:
+      analyze-types: true
+      exclude-godoc-examples: true
+      forbid:
+        # Rule 1 — lock-free first
+        - pattern: '^sync\.Mutex$'
+          msg: "sync.Mutex is disallowed. Prefer sync/atomic or xsync/v4 (xsync.Map, xsync.Counter). If a mutex is truly required, use xsync.RBMutex."
+        - pattern: '^sync\.RWMutex$'
+          msg: "sync.RWMutex is disallowed. Use xsync.RBMutex or channels."
+        - pattern: '^sync\.Map$'
+          msg: "sync.Map is disallowed. Use xsync.Map (generic, faster)."
+        # Rule 2 — NSF wrappers, not upstream primitives
+        - pattern: '^zap\.(New|NewProduction|NewDevelopment|NewExample|NewNop|Must|NewProductionConfig|NewDevelopmentConfig|NewProductionEncoderConfig|NewDevelopmentEncoderConfig)$'
+          msg: "Do not construct zap loggers directly. Inject logx.Logger, or use logx.{Debug,Info,Warn,Error,Fatal}(ctx, ...). zap.Field helpers (zap.String, zap.Error, …) remain allowed."
+        - pattern: '^promauto\.'
+          msg: "promauto.* is disallowed. Use NSF metricx (from nsx-gen)."
+        # Rule 7 — production-code hygiene
+        - pattern: '^fmt\.Print(|f|ln)$'
+          msg: "fmt.Print* is disallowed in production. Use logx for structured output; t.Log / t.Logf in tests."
+        - pattern: '^print$'
+        - pattern: '^println$'
+
+    funlen:
+      lines: 100
+      statements: 50
+      ignore-comments: true
+
+    gocognit:
+      min-complexity: 20
+
+    gocritic:
+      disabled-checks:
+        - ifElseChain
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+        - opinionated
+      settings:
+        captLocal:
+          paramsOnly: true
+        hugeParam:
+          sizeThreshold: 512
+
+    godot:
+      scope: declarations
+      period: true
+      capital: true
+
+    gosec:
+      excludes:
+        - G115 # integer overflow conversions — too many FP on modern Go
+
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    importas:
+      no-unaliased: true
+      alias:
+        - pkg: github.com/puzpuzpuz/xsync/v4
+          alias: xsync
+        - pkg: sigs.k8s.io/controller-runtime/pkg/client
+          alias: ctrlclient
+        - pkg: sigs.k8s.io/controller-runtime/pkg/log
+          alias: ctrllog
+
+    mnd:
+      ignored-functions:
+        - os.Exit
+        - flag.*
+        - strconv.Parse.*
+        - strconv.Format.*
+        - metric.*
+      ignored-numbers:
+        - "0"
+        - "1"
+        - "2"
+        - "10"
+        - "100"
+        - "1000"
+
+    nestif:
+      min-complexity: 4
+
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    perfsprint:
+      int-conversion: true
+      err-error: false
+      errorf: true
+      sprintf1: true
+      strconcat: true
+
+    revive:
+      severity: warning
+      enable-all-rules: false
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+          arguments: [disableStutteringCheck]
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+        - name: unused-parameter
+          arguments:
+            - allowRegex: "^_"
+        - name: early-return
+        - name: use-any
+        - name: unchecked-type-assertion
+        - name: confusing-results
+        - name: confusing-naming
+        - name: identical-branches
+        - name: unnecessary-stmt
+        - name: defer
+        - name: bool-literal-in-expr
+        - name: struct-tag
+
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000" # package comment not required on every package
+        - "-ST1016" # receiver name conflict — noisy
+        - "-QF1008" # "omit embedded field" — can hurt readability
+
+    testifylint:
+      enable-all: true
+
+    usetesting:
+      os-setenv: true
+      os-temp-dir: true
+
+    # wsl_v5 uses defaults. Adjust here via PR to Linting.md if a rule needs to bend codebase-wide.
+
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Tests: relax noise-prone linters. errcheck stays on — ignored errors in tests hide real failures.
+      - path: '_test\.go'
+        linters:
+          - cyclop
+          - funlen
+          - gocognit
+          - mnd
+          - forcetypeassert
+      - path: 'zz_generated\.'
+        linters: [all]
+
+      # Framework exceptions (see Linting.md).
+      - path: '(^|/)fx\.go$'
+        linters: [gochecknoglobals]
+      - path: '(^|/)cmd/'
+        linters: [gochecknoinits]
+
+      # If you maintain the logx module itself, override here to allow direct zap construction:
+      # - path: '^path/to/logx/internal/'
+      #   linters: [forbidigo]
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+    - gci
+  settings:
+    gofumpt:
+      extra-rules: true
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/NSXBet)
+        - localmodule
+      custom-order: true
