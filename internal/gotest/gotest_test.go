@@ -1,7 +1,6 @@
 package gotest
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -178,11 +177,9 @@ func TestRunAllArgsForwardedVerbatim(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
+			res := RunAll(t.Context(), t.TempDir(), tt.extra, true)
 
-			RunAll(t.Context(), t.TempDir(), tt.extra, true, &buf)
-
-			if got := strings.TrimSpace(buf.String()); got != tt.want {
+			if got := strings.TrimSpace(res.Output); got != tt.want {
 				t.Fatalf("command = %q want %q", got, tt.want)
 			}
 		})

@@ -5,7 +5,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,23 +201,27 @@ func runAll(ctx context.Context, opts *options, extra []string) int {
 		return 2
 	}
 
+	res := gotest.RunAll(ctx, root, extra, opts.dryRun)
+
 	// Under --json stdout carries the document, so go test output goes to
 	// stderr to keep it parseable.
-	testOut := io.Writer(os.Stdout)
-	if opts.json {
-		testOut = os.Stderr
-	}
-
-	code := gotest.RunAll(ctx, root, extra, opts.dryRun, testOut)
-
 	if opts.json {
 		rep := &report{Selected: map[string][]string{}, All: true}
 		if jerr := renderJSON(os.Stdout, rep); jerr != nil {
 			fmt.Fprintln(os.Stderr, jerr)
 		}
+
+		fmt.Fprint(os.Stderr, res.Output)
+	} else {
+		renderHeader(os.Stdout, &report{All: true}, nil, opts.dryRun)
+		renderOutcome(os.Stdout, []gotest.Result{res})
 	}
 
-	return code
+	if res.Err != nil {
+		return 1
+	}
+
+	return 0
 }
 
 // runSelection performs the two decision rounds and runs the selected tests.
@@ -243,7 +246,6 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 	}
 
 	state := buildState(f.mb, f.files, f.diff)
-	fmt.Fprintf(os.Stderr, "state: %d chars, changed files: %d, test files: %d\n", len(state), len(f.files), len(f.testFiles))
 
 	c := decide.NewClient(opts.endpoint, key, opts.model)
 	parsedFiles, r1qs := round1(f.root, f.g, f.testFiles, f.files)
@@ -279,24 +281,45 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 		rep.Judging = c.Exchanges()
 	}
 
-	emit(rep, opts)
+	// Describe the run before it starts (JSON or the human header), then run it.
+	emit(rep, opts, extra)
 
 	if len(selected) == 0 {
 		return 0
 	}
 
-	testOut := io.Writer(os.Stdout)
+	results := gotest.Run(ctx, f.root, selected, extra, opts.dryRun)
+
+	// Under --json stdout carries the document, so go test output goes to
+	// stderr to keep it parseable.
 	if opts.json {
-		testOut = os.Stderr
+		for i := range results {
+			fmt.Fprint(os.Stderr, results[i].Output)
+		}
+	} else {
+		renderOutcome(os.Stdout, results)
 	}
 
-	return gotest.Run(ctx, f.root, selected, extra, opts.dryRun, testOut)
+	// A skipped package is not a failure; see renderOutcome.
+	failed := 0
+
+	for i := range results {
+		if results[i].Err != nil {
+			failed++
+		}
+	}
+
+	if failed > 0 {
+		return 1
+	}
+
+	return 0
 }
 
 // emit renders the report: JSON to stdout under --json, otherwise the text
 // report to stdout and — under --verbose — the decisioning audit trail to
 // stderr, so the report stays parseable.
-func emit(rep *report, opts *options) {
+func emit(rep *report, opts *options, extra []string) {
 	if opts.json {
 		if err := renderJSON(os.Stdout, rep); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -305,7 +328,9 @@ func emit(rep *report, opts *options) {
 		return
 	}
 
-	renderText(os.Stdout, rep)
+	// The human report opens with what is about to run; the outcome follows
+	// once the tests finish.
+	renderHeader(os.Stdout, rep, gotest.Plan(rep.Selected, extra), opts.dryRun)
 
 	if opts.verbose {
 		renderExchangesText(os.Stderr, rep)

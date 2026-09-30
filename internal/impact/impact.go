@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -84,8 +85,12 @@ func indexArgs() []string {
 	return append(args, ".")
 }
 
-// Update runs `grove index .` rooted at root, streaming its output to stderr.
-// Grove indexes incrementally (by content hash), so a warm run is a no-op.
+// Update runs `grove index .` rooted at root. Grove indexes incrementally (by
+// content hash), so a warm run is a no-op.
+//
+// Its output is captured rather than streamed: a successful index prints a JSON
+// summary that is noise in a test report, and it would land in the middle of the
+// run's own output. The captured text is folded into the error if it fails.
 func Update(ctx context.Context, root string) error {
 	if _, err := exec.LookPath("grove"); err != nil {
 		return errors.New("grove not found in PATH (install: https://github.com/provasign/grove)")
@@ -94,11 +99,14 @@ func Update(ctx context.Context, root string) error {
 	// argv, never a shell; indexArgs() is a fixed list.
 	cmd := exec.CommandContext(ctx, "grove", indexArgs()...) //nolint:gosec // fixed argv, no shell
 	cmd.Dir = root
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+
+	var stderr bytes.Buffer
+
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("grove index failed: %w", err)
+		return fmt.Errorf("grove index failed: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 
 	return nil

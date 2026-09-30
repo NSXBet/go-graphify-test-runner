@@ -56,35 +56,6 @@ func renderJSON(w io.Writer, rep *report) error {
 	return enc.Encode(rep)
 }
 
-// renderText writes the human-readable report, mirroring the historical output.
-func renderText(w io.Writer, rep *report) {
-	for _, r := range rep.Rounds {
-		keys := make([]string, 0, len(r.Scores))
-		for k := range r.Scores {
-			keys = append(keys, k)
-		}
-
-		sort.Strings(keys)
-
-		fmt.Fprintf(w, "%s: %d asked, %d selected\n", r.Name, len(keys), len(r.Selected))
-
-		for _, k := range keys {
-			mark := "no "
-			if r.Scores[k] >= r.Threshold {
-				mark = "YES"
-			}
-
-			fmt.Fprintf(w, "  %.2f %s %s\n", r.Scores[k], mark, k)
-		}
-	}
-
-	fmt.Fprintf(w, "cost: $%.6f\n", rep.Cost)
-
-	if len(rep.Selected) == 0 {
-		fmt.Fprintln(w, "no tests selected")
-	}
-}
-
 // renderExchangesText writes the verbose decisioning audit trail.
 func renderExchangesText(w io.Writer, rep *report) {
 	fmt.Fprintf(w, "state (%d chars):\n", rep.StateChars)

@@ -161,15 +161,20 @@ func TestCLIDryRunSelectsOnlyAlpha(t *testing.T) {
 
 	got := string(out)
 
-	if !strings.Contains(got, "pkg/alpha/alpha_test.go") {
-		t.Fatalf("alpha test file not selected:\n%s", got)
+	// The header reports how much was selected; one test file out of the two
+	// with one test selected is the signature of alpha being chosen and beta
+	// not.
+	if !strings.Contains(got, "2 test files considered, 1 selected") ||
+		!strings.Contains(got, "1 test considered, 1 selected") {
+		t.Fatalf("selection counts wrong:\n%s", got)
 	}
 
-	if strings.Contains(got, "YES pkg/beta/beta_test.go") {
+	// The beta package must not appear anywhere in the plan.
+	if strings.Contains(got, "pkg/beta") {
 		t.Fatalf("beta selected despite no change:\n%s", got)
 	}
 
-	if !strings.Contains(got, "go test") || !strings.Contains(got, "./pkg/alpha") {
+	if !strings.Contains(got, "go test") || !strings.Contains(got, "pkg/alpha") {
 		t.Fatalf("dry-run did not print the go test command:\n%s", got)
 	}
 

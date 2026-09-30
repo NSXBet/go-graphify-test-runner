@@ -1,5 +1,5 @@
-// Package gotest discovers Go test files and functions and runs a selected set
-// of tests grouped by package directory.
+// Package gotest lists a repository's Go test files and functions, and runs a
+// selected subset of them grouped by package.
 package gotest
 
 import (
@@ -16,6 +16,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -30,6 +31,32 @@ type Func struct {
 	Name string
 	Src  string
 }
+
+// Result is the outcome of running one package's tests.
+type Result struct {
+	// Dir is the repository-relative package directory.
+	Dir string
+	// Funcs are the tests that were requested (nil under --all, where no -run
+	// filter is applied).
+	Funcs []string
+	// Output is the combined stdout/stderr of the go test invocation. It is
+	// held so the caller can decide how to present it: the human report shows
+	// it only for failures, keeping a green run quiet.
+	Output string
+	// Err is non-nil when the package failed to build or a test failed.
+	Err error
+	// Skipped is set when the package was not run at all (no files the current
+	// build tags select); Err is nil and it is not a failure.
+	Skipped bool
+	// Duration is how long the package's go test invocation took.
+	Duration time.Duration
+	// DryRun marks a result that was planned but not executed; Output then
+	// holds the command line that would have run.
+	DryRun bool
+}
+
+// Ok reports whether the package's tests passed.
+func (r Result) Ok() bool { return r.Err == nil && !r.Skipped }
 
 // ListFiles returns tracked and untracked Go test files, excluding vendor and
 // testdata trees.
@@ -145,21 +172,16 @@ func ModuleRoot(root, dir string) string {
 	return root
 }
 
-// Run runs the selected tests grouped by package directory. Command lines and
-// subprocess output are written to out (os.Stdout in normal use; os.Stderr when
-// --json reserves stdout for the JSON document). It returns the process exit
-// code (0 ok, 1 any failure).
-func Run(ctx context.Context, root string, selected map[string][]string, extra []string, dryRun bool, out io.Writer) int {
-	if out == nil {
-		out = os.Stdout
-	}
-
+// Plan resolves what Run would do — which selected directories survive the
+// caller's targets, and which tests each one requests — without running
+// anything. Callers use it to describe the run before it starts.
+func Plan(selected map[string][]string, extra []string) []Result {
 	// Separate the caller's go test flags from any package targets they named.
 	// Flags are forwarded to each invocation; a target narrows which selected
 	// directories run at all. Appending the target as well would run the whole
 	// named tree on every invocation (and make the per-directory package
 	// argument redundant), which is the bug this split exists to prevent.
-	flags, targets := splitArgs(extra)
+	_, targets := splitArgs(extra)
 
 	dirs := make([]string, 0, len(selected))
 	for d := range selected {
@@ -172,15 +194,130 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 
 	sort.Strings(dirs)
 
-	code := 0
+	results := make([]Result, 0, len(dirs))
 
 	for _, dir := range dirs {
-		if !runDir(ctx, root, dir, selected[dir], flags, dryRun, out) {
-			code = 1
-		}
+		names := append([]string(nil), selected[dir]...)
+		sort.Strings(names)
+
+		results = append(results, Result{Dir: dir, Funcs: names})
 	}
 
-	return code
+	return results
+}
+
+// Run runs the selected tests grouped by package directory and returns one
+// Result per package, in directory order. Callers render the results; nothing
+// is written to the terminal here, so a green run can stay quiet.
+func Run(ctx context.Context, root string, selected map[string][]string, extra []string, dryRun bool) []Result {
+	flags, _ := splitArgs(extra)
+
+	results := Plan(selected, extra)
+
+	for i := range results {
+		results[i] = runDir(ctx, root, results[i].Dir, results[i].Funcs, flags, dryRun)
+	}
+
+	return results
+}
+
+// RunAll runs the test suite from the repository root with no diff, graph or
+// -run filter — the --all path, where the tool is a passthrough to go test
+// rather than a selector.
+//
+// Args are forwarded verbatim so the caller keeps every go test capability:
+// flags (`-race -count=1`), a -run filter, package patterns, or a specific
+// directory. Only when no package target is given does it default to `./...`,
+// which is what makes a bare `--all` mean "everything".
+func RunAll(ctx context.Context, root string, extra []string, dryRun bool) Result {
+	args := append([]string{"test"}, extra...)
+	if !hasTarget(extra) {
+		args = append(args, "./...")
+	}
+
+	res := Result{Dir: "."}
+
+	if dryRun {
+		res.DryRun = true
+		res.Output = "go " + strings.Join(args, " ")
+
+		return res
+	}
+
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = ModuleRoot(root, ".")
+
+	var buf bytes.Buffer
+
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	if err := cmd.Run(); err != nil {
+		res.Err = err
+	}
+
+	res.Output = buf.String()
+
+	return res
+}
+
+// runDir runs one package's selected tests and captures the outcome.
+func runDir(ctx context.Context, root, dir string, names, flags []string, dryRun bool) Result {
+	names = append([]string(nil), names...)
+	sort.Strings(names)
+
+	res := Result{Dir: dir, Funcs: names}
+
+	pkgDir := filepath.Join(root, dir)
+	m := ModuleRoot(root, dir)
+
+	rel, err := filepath.Rel(m, pkgDir)
+	if err != nil {
+		rel = pkgDir
+	}
+
+	pattern := "./" + filepath.ToSlash(rel)
+
+	// Skip a package the current build tags cannot build; see buildable.
+	if !buildable(ctx, m, pattern) {
+		res.Skipped = true
+		res.Output = fmt.Sprintf("skipping %s: no buildable Go files with the current flags", pattern)
+
+		return res
+	}
+
+	args := append([]string{"test"}, flags...)
+	if len(names) > 0 {
+		args = append(args, "-run", `^(`+strings.Join(names, "|")+`)$`)
+	}
+
+	args = append(args, pattern)
+
+	if dryRun {
+		res.DryRun = true
+		res.Output = "go " + strings.Join(args, " ")
+
+		return res
+	}
+
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = m
+
+	var buf bytes.Buffer
+
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+
+	start := time.Now()
+
+	if rerr := cmd.Run(); rerr != nil {
+		res.Err = rerr
+	}
+
+	res.Duration = time.Since(start)
+	res.Output = buf.String()
+
+	return res
 }
 
 // splitArgs separates go test flags from package targets. A target is a path
@@ -232,42 +369,6 @@ func matchesTargets(dir string, targets []string) bool {
 	return false
 }
 
-// RunAll runs the test suite from the repository root with no diff, graph or
-// -run filter — the --all path, where the tool is a passthrough to go test
-// rather than a selector.
-//
-// Args are forwarded verbatim so the caller keeps every go test capability:
-// flags (`-race -count=1`), a -run filter, package patterns, or a specific
-// directory. Only when no package target is given does it default to `./...`,
-// which is what makes a bare `--all` mean "everything".
-func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out io.Writer) int {
-	if out == nil {
-		out = os.Stdout
-	}
-
-	args := append([]string{"test"}, extra...)
-	if !hasTarget(extra) {
-		args = append(args, "./...")
-	}
-
-	if dryRun {
-		fmt.Fprintln(out, "go "+strings.Join(args, " "))
-
-		return 0
-	}
-
-	cmd := exec.CommandContext(ctx, "go", args...)
-	cmd.Dir = ModuleRoot(root, ".")
-	cmd.Stdout = out
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return 1
-	}
-
-	return 0
-}
-
 // buildable reports whether a package directory has any Go file the current
 // build tags select. A directory whose every file sits behind a tag the run does
 // not enable (e2e/, integration/) makes `go test <dir>` fail with "build
@@ -279,9 +380,7 @@ func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out i
 // make `go list` fail and be misread as "unbuildable", silently skipping a
 // package instead of surfacing the bad flag to the user.
 func buildable(ctx context.Context, m, pattern string) bool {
-	args := []string{"list", "-find", pattern}
-
-	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd := exec.CommandContext(ctx, "go", "list", "-find", pattern)
 	cmd.Dir = m
 
 	var out bytes.Buffer
@@ -296,50 +395,4 @@ func buildable(ctx context.Context, m, pattern string) bool {
 	// `go list -find` prints the package when it has buildable files, and
 	// nothing when the build constraints exclude them all.
 	return strings.TrimSpace(out.String()) != ""
-}
-
-// runDir runs one package's selected tests; returns false on failure.
-func runDir(ctx context.Context, root, dir string, names, extra []string, dryRun bool, out io.Writer) bool {
-	names = append([]string(nil), names...)
-	sort.Strings(names)
-
-	pkgDir := filepath.Join(root, dir)
-	m := ModuleRoot(root, dir)
-
-	rel, err := filepath.Rel(m, pkgDir)
-	if err != nil {
-		rel = pkgDir
-	}
-
-	pattern := "./" + filepath.ToSlash(rel)
-	run := `^(` + strings.Join(names, "|") + `)$`
-
-	// Skip a package the current build tags cannot build; see buildable.
-	if !buildable(ctx, m, pattern) {
-		fmt.Fprintf(os.Stderr, "skipping %s: no buildable Go files with the current flags\n", pattern)
-
-		return true
-	}
-
-	args := append([]string{"test"}, extra...)
-	args = append(args, "-run", run, pattern)
-
-	if dryRun {
-		fmt.Fprintln(out, "go "+strings.Join(args, " "))
-
-		return true
-	}
-
-	cmd := exec.CommandContext(ctx, "go", args...)
-	cmd.Dir = m
-	cmd.Stdout = out
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "go test %s failed: %v\n", pattern, err)
-
-		return false
-	}
-
-	return true
 }

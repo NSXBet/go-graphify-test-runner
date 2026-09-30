@@ -169,6 +169,41 @@ smart-test-runner -- -race -count=1     # everything after -- goes to go test
 Anything after `--` is forwarded verbatim to `go test`, so all `go test` flags
 keep working (`-- -race -count=1 -v`; `-run` is managed by the tool).
 
+### Reading the output
+
+A selected run prints what it is about to do, then the outcome — one line per
+package, and the captured `go test` output only when it says something the line
+above does not:
+
+```
+smart-test-runner  dc54a1ab08a8 · 7 changed files
+20 test files considered, 7 selected · 49 tests considered, 14 selected
+running 14 tests in 1 package
+decisions cost $0.0021
+
+  ↷ e2e  no buildable Go files
+  ✓ internal/cmd  6 tests  510ms
+  ✗ pkg/alpha  1 test  990ms
+
+✗ pkg/alpha
+    --- FAIL: TestAdd (0.00s)
+        alpha_test.go:5: boom
+
+FAIL  1 of 3 packages failed
+```
+
+- `✓` passed, `✗` failed, `↷` skipped — a package whose files are all behind a
+  build tag the run does not enable (`e2e/`, `integration/`). Skipping is not a
+  failure.
+- A bare pass prints only `ok pkg 0.1s`, which the package line already says, so
+  it is not repeated. A forwarded `-v` (`=== RUN`) or a failure adds real detail
+  and is printed indented under its package.
+- Colour is used only on a terminal; a pipe, a redirect or `NO_COLOR` renders
+  plain text.
+
+`--dry-run` reports the exact commands that would run instead of a pass/fail
+claim, since nothing executed.
+
 ### `--all` — use it as `go test`
 
 `--all` skips the diff, the code graph and the model, and forwards to `go test`

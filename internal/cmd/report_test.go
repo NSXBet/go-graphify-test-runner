@@ -3,10 +3,16 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/muesli/termenv"
 
 	"github.com/NSXBet/go-smart-test-runner/internal/decide"
+	"github.com/NSXBet/go-smart-test-runner/internal/gotest"
 )
 
 func sampleReport() *report {
@@ -67,33 +73,70 @@ func TestJSONOmitsJudgingWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestRenderText(t *testing.T) {
+func TestRenderHeaderCountsSelection(t *testing.T) {
 	var buf bytes.Buffer
 
-	renderText(&buf, sampleReport())
+	renderHeader(&buf, sampleReport(), gotest.Plan(sampleReport().Selected, nil), false)
 
 	out := buf.String()
-	for _, want := range []string{"round 1 (files): 2 asked, 1 selected", "0.90 YES pkg/a_test.go", "0.10 no  pkg/b_test.go", "cost: $0.001000"} {
+	for _, want := range []string{
+		"smart-test-runner",
+		"abc123 · 1 changed files",
+		"2 test files considered, 1 selected · 1 test considered, 1 selected",
+		"running 1 test in 1 package",
+		"decisions cost $0.0010",
+	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("text report missing %q:\n%s", want, out)
+			t.Fatalf("header missing %q:\n%s", want, out)
 		}
-	}
-
-	if strings.Contains(out, "no tests selected") {
-		t.Fatal("text report claims nothing selected when tests were selected")
 	}
 }
 
-func TestRenderTextNoSelection(t *testing.T) {
-	rep := sampleReport()
-	rep.Selected = map[string][]string{}
-
+func TestRenderOutcomePass(t *testing.T) {
 	var buf bytes.Buffer
 
-	renderText(&buf, rep)
+	renderOutcome(&buf, []gotest.Result{{Dir: "pkg", Funcs: []string{"TestA"}, Duration: 120 * time.Millisecond}})
 
-	if !strings.Contains(buf.String(), "no tests selected") {
-		t.Fatalf("missing no-selection line:\n%s", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "✓ pkg") {
+		t.Fatalf("missing package pass line:\n%s", out)
+	}
+
+	if !strings.Contains(out, "PASS") || strings.Contains(out, "FAIL") {
+		t.Fatalf("verdict not PASS:\n%s", out)
+	}
+}
+
+func TestRenderOutcomeFailShowsOutput(t *testing.T) {
+	var buf bytes.Buffer
+
+	renderOutcome(&buf, []gotest.Result{{
+		Dir:    "pkg",
+		Funcs:  []string{"TestA"},
+		Err:    errors.New("exit status 1"),
+		Output: "--- FAIL: TestA\n    boom\n",
+	}})
+
+	out := buf.String()
+	for _, want := range []string{"✗ pkg", "FAIL", "--- FAIL: TestA", "boom"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("outcome missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderOutcomeSkippedStillPasses(t *testing.T) {
+	var buf bytes.Buffer
+
+	renderOutcome(&buf, []gotest.Result{{Dir: "pkg", Skipped: true}})
+
+	out := buf.String()
+	if !strings.Contains(out, "↷ pkg") {
+		t.Fatalf("missing skip marker:\n%s", out)
+	}
+
+	if !strings.Contains(out, "PASS") || strings.Contains(out, "FAIL") {
+		t.Fatalf("skipped package must not fail the run:\n%s", out)
 	}
 }
 
@@ -124,5 +167,114 @@ func TestRenderExchangesText(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("exchange text missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestRenderOutcomeShowsVerboseOutputWhilePassing proves a forwarded -v still
+// surfaces: a bare pass prints only "ok pkg 0.1s" and stays quiet, but verbose
+// output carries real detail and must not be swallowed.
+func TestRenderOutcomeShowsVerboseOutputWhilePassing(t *testing.T) {
+	var quiet, verbose bytes.Buffer
+
+	renderOutcome(&quiet, []gotest.Result{{
+		Dir: "pkg", Funcs: []string{"TestA"}, Output: "ok  \tpkg\t0.1s\n",
+	}})
+
+	if strings.Contains(quiet.String(), "0.1s") {
+		t.Fatalf("a bare pass should not repeat go test's summary line:\n%s", quiet.String())
+	}
+
+	renderOutcome(&verbose, []gotest.Result{{
+		Dir: "pkg", Funcs: []string{"TestA"}, Output: "=== RUN   TestA\n--- PASS: TestA (0.00s)\nPASS\nok  \tpkg\t0.1s\n",
+	}})
+
+	if !strings.Contains(verbose.String(), "=== RUN   TestA") {
+		t.Fatalf("verbose output was swallowed:\n%s", verbose.String())
+	}
+}
+
+// TestRenderOutcomeDryRunPrintsCommands proves --dry-run reports the commands
+// that would run instead of a pass/fail claim: nothing executed, so PASS would
+// be a lie.
+func TestRenderOutcomeDryRunPrintsCommands(t *testing.T) {
+	var buf bytes.Buffer
+
+	renderOutcome(&buf, []gotest.Result{{
+		Dir: "pkg", Funcs: []string{"TestA"}, DryRun: true,
+		Output: "go test -run ^(TestA)$ ./pkg",
+	}})
+
+	out := buf.String()
+	if !strings.Contains(out, "go test -run ^(TestA)$ ./pkg") {
+		t.Fatalf("dry run did not print the command:\n%s", out)
+	}
+
+	if strings.Contains(out, "PASS") || strings.Contains(out, "FAIL") {
+		t.Fatalf("dry run claims an outcome it did not observe:\n%s", out)
+	}
+}
+
+// TestRenderHeaderReportsNoSelection proves an empty selection says so rather
+// than silently listing zero tests.
+func TestRenderHeaderReportsNoSelection(t *testing.T) {
+	var buf bytes.Buffer
+
+	rep := sampleReport()
+	rep.Rounds = []roundReport{
+		newRoundReport("round 1 (files)", map[string]float64{"a_test.go": 0.1}, 0.5),
+		newRoundReport("round 2 (tests)", map[string]float64{"a_test.go::TestA": 0.1}, 0.5),
+	}
+	rep.Selected = map[string][]string{}
+
+	renderHeader(&buf, rep, nil, false)
+
+	if !strings.Contains(buf.String(), "no tests selected") {
+		t.Fatalf("missing no-selection message:\n%s", buf.String())
+	}
+}
+
+// TestRenderHeaderPluralises proves the counts read as English.
+func TestRenderHeaderPluralises(t *testing.T) {
+	var buf bytes.Buffer
+
+	rep := sampleReport()
+	rep.Rounds = []roundReport{
+		newRoundReport("round 1 (files)", map[string]float64{"a_test.go": 0.9}, 0.5),
+		newRoundReport("round 2 (tests)", map[string]float64{"a_test.go::TestA": 0.9}, 0.5),
+	}
+
+	renderHeader(&buf, rep, gotest.Plan(rep.Selected, nil), false)
+
+	out := buf.String()
+	if !strings.Contains(out, "1 test file considered, 1 selected · 1 test considered, 1 selected") {
+		t.Fatalf("counts not pluralised correctly:\n%s", out)
+	}
+
+	if !strings.Contains(out, "running 1 test in 1 package") {
+		t.Fatalf("run line not pluralised correctly:\n%s", out)
+	}
+}
+
+// TestColorProfileDiscipline proves colour never leaks into a non-terminal:
+// a buffer renders plain, NO_COLOR forces plain even on a terminal, and a
+// character device gets colour.
+func TestColorProfileDiscipline(t *testing.T) {
+	var buf bytes.Buffer
+
+	if got := colorProfile(&buf); got != termenv.Ascii {
+		t.Fatalf("buffer profile = %v want Ascii", got)
+	}
+
+	t.Setenv("NO_COLOR", "1")
+
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer f.Close()
+
+	if got := colorProfile(f); got != termenv.Ascii {
+		t.Fatalf("NO_COLOR profile = %v want Ascii", got)
 	}
 }
