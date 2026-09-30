@@ -128,34 +128,58 @@ func (g *Graph) IndexChanged(ctx context.Context, changed []string) error {
 			return err
 		}
 
-		pkg := path.Dir(file)
-
-		for i := range nodes {
-			n := &nodes[i]
-			if n.FilePath == "" || n.FilePath == file {
-				continue
-			}
-
-			if g.reachers[n.FilePath] == nil {
-				g.reachers[n.FilePath] = map[string]Reach{}
-			}
-
-			r := g.reachers[n.FilePath][file]
-			r.File = file
-			r.Direct = append(r.Direct, directCalls(n, pkg)...)
-			g.reachers[n.FilePath][file] = r
-		}
+		g.indexOne(file, nodes)
 	}
 
 	return nil
 }
 
-// directCalls returns the call sites in n that name a symbol in pkg, e.g.
-// "envx.IsDeployed" for pkg == "pkg/envx".
-func directCalls(n *IndexedNode, pkg string) []string {
-	// envx == the package's base name for pkg/envx.
-	base := path.Base(pkg)
+// indexOne folds one changed file's impact into the reachers map.
+func (g *Graph) indexOne(file string, nodes []IndexedNode) {
+	// Call sites name the *package* (envx.IsDeployed), not the file
+	// (detector.go), so the caller's directory identifies the calling package.
+	base := path.Base(path.Dir(file))
+	callingPkgs := map[string][]string{}
 
+	for i := range nodes {
+		n := &nodes[i]
+		if n.FilePath == "" || n.FilePath == file {
+			continue
+		}
+
+		if calls := packageCalls(n, base); len(calls) > 0 {
+			dir := path.Dir(n.FilePath)
+			callingPkgs[dir] = append(callingPkgs[dir], calls...)
+		}
+
+		g.reach(n.FilePath, file)
+	}
+
+	// A reacher in a calling package is direct even when the call site sits in a
+	// sibling file: awsx/session_test.go exercises awsx/session.go, which calls
+	// envx.IsDeployed, so the test must not be graded transitive-only.
+	for impacted := range g.reachers {
+		if calls := callingPkgs[path.Dir(impacted)]; len(calls) > 0 {
+			r := g.reachers[impacted][file]
+			r.Direct = append(r.Direct, calls...)
+		}
+	}
+}
+
+// reach records that impacted reaches file (Direct filled in by indexOne).
+func (g *Graph) reach(impacted, file string) {
+	if g.reachers[impacted] == nil {
+		g.reachers[impacted] = map[string]Reach{}
+	}
+
+	r := g.reachers[impacted][file]
+	r.File = file
+	g.reachers[impacted][file] = r
+}
+
+// packageCalls returns the call sites in n that name a symbol in package base
+// (e.g. "envx.IsDeployed" for base == "envx").
+func packageCalls(n *IndexedNode, base string) []string {
 	var out []string
 
 	for _, c := range n.CallSites {
@@ -176,8 +200,7 @@ func (g *Graph) Reaches(file string) []Reach {
 
 	out := make([]Reach, 0, len(byFile))
 	for _, r := range byFile {
-		sort.Strings(r.Direct)
-		r.Direct = cappedslice(r.Direct)
+		r.Direct = dedupSorted(r.Direct)
 		out = append(out, r)
 	}
 
@@ -197,13 +220,27 @@ func (g *Graph) Reaches(file string) []Reach {
 	return out
 }
 
-// cappedslice truncates a label list to evidenceCap.
-func cappedslice(in []string) []string {
-	if len(in) > evidenceCap {
-		return append(in[:evidenceCap], "…")
+// dedupSorted sorts, de-duplicates and truncates a label list.
+func dedupSorted(in []string) []string {
+	if len(in) == 0 {
+		return nil
 	}
 
-	return in
+	sort.Strings(in)
+
+	out := in[:1]
+
+	for _, v := range in[1:] {
+		if v != out[len(out)-1] {
+			out = append(out, v)
+		}
+	}
+
+	if len(out) > evidenceCap {
+		out = append(out[:evidenceCap], "…")
+	}
+
+	return out
 }
 
 // impactFile runs `grove impact <path>` and returns the symbols that reach it.
