@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -61,6 +63,25 @@ func maybeNudge(ctx context.Context) {
 	}
 }
 
+// installedVersion runs the on-disk binary's `version` subcommand, which is the
+// only way to confirm an upgrade actually replaced it (the running process
+// keeps its own version). It returns "" when it cannot be determined.
+func installedVersion() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+
+	cmd := exec.CommandContext(context.Background(), exe, "version")
+
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSpace(string(out))
+}
+
 // newUpgradeCmd builds the `upgrade` subcommand: check, then reinstall.
 func newUpgradeCmd() *cobra.Command {
 	return &cobra.Command{
@@ -95,6 +116,16 @@ func newUpgradeCmd() *cobra.Command {
 
 			if out != "" {
 				fmt.Fprint(cmd.OutOrStdout(), out)
+			}
+
+			// Verify that the on-disk binary actually moved. brew can report
+			// success while declining to upgrade (a stale tap clone makes it
+			// think the install is current), and claiming success then would
+			// leave the user on the old version believing they were updated.
+			if after := installedVersion(); after != "" && after != latest {
+				return fmt.Errorf("upgrade via %s did not take effect: still %s, expected %s "+
+					"(if installed with Homebrew, the tap may be stale - try: brew update && brew upgrade %s)",
+					used, after, latest, selfupdate.Formula)
 			}
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Updated to %s via %s. Re-run to use it.\n", latest, used)

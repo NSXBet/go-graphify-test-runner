@@ -231,16 +231,36 @@ func goInstall(ctx context.Context, tag string) (string, error) {
 }
 
 // brewUpgrade updates a Homebrew-managed install.
+//
+// The tap is refreshed first: a third-party tap is not auto-updated, so without
+// `brew update` the local clone can still carry the previous cask and brew will
+// consider the install already current.
 func brewUpgrade(ctx context.Context) (string, error) {
 	if _, err := exec.LookPath("brew"); err != nil {
 		return "", errors.New("brew not found in PATH (this binary was installed with Homebrew)")
 	}
 
-	cmd := exec.CommandContext(ctx, "brew", "upgrade", Formula)
+	var out strings.Builder
+
+	if update, uerr := runBrew(ctx, "update"); uerr == nil {
+		out.WriteString(update)
+	}
+	// A failed `brew update` is not fatal on its own; the upgrade below decides.
+
+	upgraded, err := runBrew(ctx, "upgrade", Formula)
+
+	out.WriteString(upgraded)
+
+	return out.String(), err
+}
+
+// runBrew runs one brew subcommand and returns its combined output.
+func runBrew(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "brew", args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("brew upgrade %s failed: %w", Formula, err)
+		return string(out), fmt.Errorf("brew %s failed: %w", strings.Join(args, " "), err)
 	}
 
 	return string(out), nil

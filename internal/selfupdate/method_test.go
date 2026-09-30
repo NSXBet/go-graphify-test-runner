@@ -3,6 +3,7 @@ package selfupdate
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,5 +104,44 @@ func TestBrewUpgradeRunsStub(t *testing.T) {
 
 	if out == "" {
 		t.Fatal("no output captured from brew stub")
+	}
+}
+
+// TestBrewUpgradeRefreshesTapFirst proves the tap is refreshed before the
+// upgrade: a third-party tap is not auto-updated, so without `brew update` the
+// local clone can carry the previous cask and brew reports "already installed"
+// while leaving the old binary in place.
+func TestBrewUpgradeRefreshesTapFirst(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + log + "\n"
+
+	if err := os.WriteFile(filepath.Join(dir, "brew"), []byte(script), 0o700); err != nil { //nolint:gosec // executable test stub
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", dir)
+
+	if _, err := brewUpgrade(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := string(calls)
+	if !strings.Contains(got, "update") {
+		t.Fatalf("brew update not called first:\n%s", got)
+	}
+
+	if !strings.Contains(got, "upgrade "+Formula) {
+		t.Fatalf("brew upgrade not called:\n%s", got)
+	}
+
+	if strings.Index(got, "update") > strings.Index(got, "upgrade") {
+		t.Fatalf("brew upgrade ran before brew update:\n%s", got)
 	}
 }
