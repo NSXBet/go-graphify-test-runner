@@ -1,5 +1,9 @@
 # Releases on a version tag: builds the binaries with GoReleaser and publishes
-# them to GitHub. Tags look like v1.2.3.
+# them to GitHub (and the Homebrew tap). Tags look like v1.2.3.
+#
+# Only actions allowlisted by the org are referenced: `actions/*` (GitHub-owned)
+# and `nsx-actions/*` (the org's mirrors of third-party actions). Referencing
+# e.g. golangci/golangci-lint-action directly fails the run at startup.
 name: release
 
 on:
@@ -24,16 +28,21 @@ jobs:
           cache: true
 
       # Fail the release on lint or tests before publishing anything.
+      # Action v8+ is required for golangci-lint v2 (our .golangci.yml says version: "2").
+      # install-mode: goinstall builds golangci-lint with the toolchain setup-go
+      # just installed (1.27), so a prebuilt binary compiled against an older Go
+      # cannot reject this module's go directive.
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: nsx-actions/golangci_golangci-lint-action@v8
         with:
           version: latest
+          install-mode: goinstall
 
       - name: Test
         run: go test ./...
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: nsx-actions/goreleaser_goreleaser-action@v6
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -41,6 +50,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Fine-grained PAT with contents:write on NSXBet/homebrew-tap, so
-          # goreleaser can push the formula. Without it, the GitHub release is
+          # goreleaser can push the cask. Without it, the GitHub release is
           # still published but no tap update is attempted.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
