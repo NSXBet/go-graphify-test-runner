@@ -55,7 +55,7 @@ Catches:  `ListFiles` admitting `vendor/` or `testdata/` test files (so the
           failing to stop at the nearest `go.mod` in a nested module.
 Produces: internal/gotest/gotest_test.go
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 27a0770 (negate a condition)
 
 ## Phase 5: Decisions client batching and weak-test fix
 
