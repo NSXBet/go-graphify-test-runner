@@ -43,6 +43,31 @@ The version comes from, in order: the value the release build injects
 (`-ldflags -X .../internal/version.Version`), then the module version the Go
 toolchain embeds (a `go install ...@<tag>` build), then `dev`.
 
+## Staying up to date
+
+On a normal run the tool checks (once a day, cached) whether a newer release
+exists and prints a one-line hint to stderr:
+
+```
+A new version of graphify-test-runner is available: v1.2.0 (you have v1.1.0)
+Update with:  graphify-test-runner upgrade
+         or:  go install github.com/NSXBet/go-graphify-test-runner@v1.2.0
+```
+
+```bash
+graphify-test-runner check-update   # report only
+graphify-test-runner upgrade        # reinstall the latest release via go install
+```
+
+- The check never blocks a run: it is best-effort, time-boxed, and any failure
+  is silent.
+- Suppress it with `--no-update-check` or `GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK=1`.
+- It is skipped automatically for `--json` (so stdout stays a clean document)
+  and for `version`/`help`.
+- `GRAPHIFY_TEST_RUNNER_UPDATE_API` overrides the release API root (mirrors).
+- `upgrade` validates the tag before shelling out to `go install`; installs from
+  the `install.sh` path are updated by re-running the script instead.
+
 ## Releases
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which lints, tests,
@@ -75,6 +100,7 @@ graphify-test-runner -- -race -count=1     # everything after -- goes to go test
 | `--dry-run` | `false` | print selection and `go test` commands, do not run |
 | `--verbose` | `false` | print the full decisioning exchange to stderr |
 | `--json` | `false` | emit the whole result as JSON on stdout |
+| `--no-update-check` | `false` | skip the check for a newer release |
 
 Anything after `--` is forwarded verbatim to `go test`, so all `go test` flags
 keep working (`-- -race -count=1 -v`; `-run` is managed by the tool).

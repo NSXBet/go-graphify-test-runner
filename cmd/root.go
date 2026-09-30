@@ -38,6 +38,7 @@ type options struct {
 	dryRun    bool
 	verbose   bool
 	json      bool
+	noUpdate  bool
 }
 
 // newRootCmd builds the root command with its flags bound to a fresh options.
@@ -55,6 +56,10 @@ func newRootCmd() *cobra.Command {
 		Args:         cobra.ArbitraryArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !opts.noUpdate && !opts.json && os.Getenv("GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK") == "" {
+				maybeNudge(cmd.Context())
+			}
+
 			if code := runSelection(cmd.Context(), &opts, args); code != 0 {
 				os.Exit(code)
 			}
@@ -72,8 +77,9 @@ func newRootCmd() *cobra.Command {
 	f.BoolVar(&opts.dryRun, "dry-run", false, "print selection and go test commands, do not run")
 	f.BoolVar(&opts.verbose, "verbose", false, "print the full decisioning exchange with the decision model to stderr, for auditing")
 	f.BoolVar(&opts.json, "json", false, "emit the full result (selection, scores, and — with --verbose — the judging) as JSON on stdout")
+	f.BoolVar(&opts.noUpdate, "no-update-check", false, "skip the check for a newer release")
 
-	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.AddCommand(newVersionCmd(), newUpgradeCmd(), newCheckUpdateCmd())
 	rootCmd.Version = version.Get()
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 
