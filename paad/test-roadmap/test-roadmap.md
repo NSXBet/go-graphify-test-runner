@@ -88,7 +88,7 @@ Catches:  `ChangedLines` on a real repository mis-parsing an added file
           Go file; `MergeBase` not surfacing the git stderr on an unknown base.
 Produces: internal/repo/repo_integration_test.go (build tag `//go:build integration`)
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 918122e (alter a constant)
 
 ## Phase 8: Test execution integration
 
