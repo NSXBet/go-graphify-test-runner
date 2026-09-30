@@ -109,7 +109,7 @@ Catches:  `Decide` sending more than one batch when a large state forces a
           that 400s twice never splitting further.
 Produces: internal/decide/decide_integration_test.go (build tag `//go:build integration`)
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 f121262 (drop a state transition)
 
 ## Phase 10: End-to-end CLI against a fixture repo
 
