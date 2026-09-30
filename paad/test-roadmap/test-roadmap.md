@@ -22,7 +22,7 @@ Catches:  a `-U0` hunk whose count is omitted (`+5`) parsed as a 5-line range
           with no trailing newline truncating the last hunk.
 Produces: internal/repo/repo_test.go
 Branch:   test-roadmap
-Landed:   2026-09-30 d00777c (off-by-one a boundary)
+Landed:   2026-09-30 81981ab (off-by-one a boundary)
 
 ## Phase 2: Changed-file set and diff wrappers
 
