@@ -238,3 +238,20 @@ func TestRunAllReportsFailure(t *testing.T) {
 		t.Fatalf("RunAll code = %d want 1 on a failing package", code)
 	}
 }
+
+// TestRunSkipsUnbuildablePackage proves a package whose files are all behind a
+// build tag the run does not enable is skipped, not reported as a failure:
+// naming such a directory makes `go test <dir>` fail with "build constraints
+// exclude all Go files" while `go test ./...` silently skips it.
+func TestRunSkipsUnbuildablePackage(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	// A package that only exists under a tag the run does not pass.
+	writeFile(t, dir, "pkg/tagged/x_test.go", "//go:build sometag\n\npackage tagged\n\nimport \"testing\"\n\nfunc TestTagged(t *testing.T) {}\n")
+
+	code := Run(ctx, dir, map[string][]string{"pkg/tagged": {"TestTagged"}}, nil, false, nil)
+	if code != 0 {
+		t.Fatalf("Run code = %d want 0 (an unbuildable package must be skipped, not fail)", code)
+	}
+}

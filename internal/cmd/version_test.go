@@ -13,6 +13,9 @@ func TestVersionCommandPrintsInjectedVersion(t *testing.T) {
 	t.Cleanup(func() { version.Version = "" })
 
 	cmd := newVersionCmd()
+	// Hermetic: SetArgs(nil) means "use os.Args" in Cobra; pass an empty,
+	// non-nil slice so a stray positional arg cannot reach the command.
+	cmd.SetArgs([]string{})
 
 	var buf bytes.Buffer
 
@@ -31,6 +34,9 @@ func TestVersionCommandDefaultsToDev(t *testing.T) {
 	version.Version = ""
 
 	cmd := newVersionCmd()
+	// Hermetic: SetArgs(nil) means "use os.Args" in Cobra; pass an empty,
+	// non-nil slice so a stray positional arg cannot reach the command.
+	cmd.SetArgs([]string{})
 
 	var buf bytes.Buffer
 

@@ -47,6 +47,10 @@ func TestCheckUpdateUpToDate(t *testing.T) {
 	t.Setenv("SMART_TEST_RUNNER_UPDATE_API", srv)
 
 	cmd := newCheckUpdateCmd()
+	// Hermetic: SetArgs(nil) means "use os.Args" in Cobra, so pass a non-nil
+	// empty slice. Without this the test breaks whenever the test binary is
+	// given extra positional args (e.g. a package pattern).
+	cmd.SetArgs([]string{})
 
 	var buf bytes.Buffer
 

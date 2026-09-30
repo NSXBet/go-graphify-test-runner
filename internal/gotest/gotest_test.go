@@ -188,3 +188,49 @@ func TestRunAllArgsForwardedVerbatim(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitArgsSeparatesFlagsFromTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		extra       []string
+		wantFlags   []string
+		wantTargets []string
+	}{
+		{"empty", nil, nil, nil},
+		{"flags only", []string{"-race", "-count=1"}, []string{"-race", "-count=1"}, nil},
+		{"target only", []string{"./pkg/x"}, nil, []string{"./pkg/x"}},
+		{"flag value stays a flag", []string{"-run", "TestFoo"}, []string{"-run", "TestFoo"}, nil},
+		{"mixed", []string{"-race", "./pkg/x"}, []string{"-race"}, []string{"./pkg/x"}},
+		{"wildcard", []string{"./..."}, nil, []string{"./..."}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, targets := splitArgs(tt.extra)
+			if !reflect.DeepEqual(flags, tt.wantFlags) || !reflect.DeepEqual(targets, tt.wantTargets) {
+				t.Fatalf("splitArgs(%v) = %v/%v want %v/%v", tt.extra, flags, targets, tt.wantFlags, tt.wantTargets)
+			}
+		})
+	}
+}
+
+func TestMatchesTargets(t *testing.T) {
+	tests := []struct {
+		dir     string
+		targets []string
+		want    bool
+	}{
+		{"internal/impact", nil, true}, // no targets: everything selected
+		{"internal/impact", []string{"./..."}, true},
+		{"internal/impact", []string{"./internal/impact"}, true},
+		{"internal/impact", []string{"internal/impact"}, true},
+		{"internal/impact", []string{"./internal/gotest"}, false},
+		{"internal/impact", []string{"."}, true},
+	}
+
+	for _, tt := range tests {
+		if got := matchesTargets(tt.dir, tt.targets); got != tt.want {
+			t.Errorf("matchesTargets(%q, %v) = %v want %v", tt.dir, tt.targets, got, tt.want)
+		}
+	}
+}

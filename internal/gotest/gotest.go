@@ -3,6 +3,7 @@
 package gotest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -152,8 +154,19 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 		out = os.Stdout
 	}
 
+	// Separate the caller's go test flags from any package targets they named.
+	// Flags are forwarded to each invocation; a target narrows which selected
+	// directories run at all. Appending the target as well would run the whole
+	// named tree on every invocation (and make the per-directory package
+	// argument redundant), which is the bug this split exists to prevent.
+	flags, targets := splitArgs(extra)
+
 	dirs := make([]string, 0, len(selected))
 	for d := range selected {
+		if !matchesTargets(d, targets) {
+			continue
+		}
+
 		dirs = append(dirs, d)
 	}
 
@@ -162,12 +175,61 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 	code := 0
 
 	for _, dir := range dirs {
-		if !runDir(ctx, root, dir, selected[dir], extra, dryRun, out) {
+		if !runDir(ctx, root, dir, selected[dir], flags, dryRun, out) {
 			code = 1
 		}
 	}
 
 	return code
+}
+
+// splitArgs separates go test flags from package targets. A target is a path
+// (starts with . / ~, contains /, or ends in .go); anything else non-dash is a
+// flag value and stays with the flags.
+func splitArgs(extra []string) (flags, targets []string) {
+	for _, a := range extra {
+		if isTarget(a) {
+			targets = append(targets, a)
+
+			continue
+		}
+
+		flags = append(flags, a)
+	}
+
+	return flags, targets
+}
+
+// hasTarget reports whether any arg names a package or file to run.
+func hasTarget(args []string) bool {
+	return slices.ContainsFunc(args, isTarget)
+}
+
+// isTarget reports whether a non-flag argument names a package or file.
+func isTarget(a string) bool {
+	if strings.HasPrefix(a, "-") {
+		return false
+	}
+
+	return strings.HasPrefix(a, ".") || strings.HasPrefix(a, "/") || strings.HasPrefix(a, "~") ||
+		strings.Contains(a, "/") || strings.HasSuffix(a, ".go")
+}
+
+// matchesTargets reports whether a selected directory is covered by the
+// caller's targets. With no targets, every selected directory runs.
+func matchesTargets(dir string, targets []string) bool {
+	if len(targets) == 0 {
+		return true
+	}
+
+	for _, t := range targets {
+		// ".", "./...", or a path containing the directory covers it.
+		if t == "." || t == "./..." || strings.Contains(t, dir) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // RunAll runs the test suite from the repository root with no diff, graph or
@@ -184,7 +246,7 @@ func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out i
 	}
 
 	args := append([]string{"test"}, extra...)
-	if !hasPackageTarget(extra) {
+	if !hasTarget(extra) {
 		args = append(args, "./...")
 	}
 
@@ -206,27 +268,34 @@ func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out i
 	return 0
 }
 
-// hasPackageTarget reports whether the go test args already name what to run.
+// buildable reports whether a package directory has any Go file the current
+// build tags select. A directory whose every file sits behind a tag the run does
+// not enable (e2e/, integration/) makes `go test <dir>` fail with "build
+// constraints exclude all Go files", while `go test ./...` silently skips it —
+// naming the directory is the difference, so selection must not emit a command
+// that cannot succeed.
 //
-// Deliberately narrow: a package pattern is an absolute or relative path
-// (starts with . / ~ or contains a /), or a single .go file. A bare word is NOT
-// treated as a target, because that is how a flag value looks —
-// `-run TestFoo` must still get a `./...` appended, and `-race` must not be
-// mistaken for a package. This is what keeps `--all -- ./pkg/mine` verbatim
-// while a bare `--all` or `--all -- -race` means everything.
-func hasPackageTarget(args []string) bool {
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
-			continue
-		}
+// The caller's flags are deliberately NOT passed here: an invalid flag would
+// make `go list` fail and be misread as "unbuildable", silently skipping a
+// package instead of surfacing the bad flag to the user.
+func buildable(ctx context.Context, m, pattern string) bool {
+	args := []string{"list", "-find", pattern}
 
-		if strings.HasPrefix(a, ".") || strings.HasPrefix(a, "/") || strings.HasPrefix(a, "~") ||
-			strings.Contains(a, "/") || strings.HasSuffix(a, ".go") {
-			return true
-		}
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = m
+
+	var out bytes.Buffer
+
+	cmd.Stdout = &out
+	cmd.Stderr = io.Discard
+
+	if err := cmd.Run(); err != nil {
+		return false
 	}
 
-	return false
+	// `go list -find` prints the package when it has buildable files, and
+	// nothing when the build constraints exclude them all.
+	return strings.TrimSpace(out.String()) != ""
 }
 
 // runDir runs one package's selected tests; returns false on failure.
@@ -244,6 +313,13 @@ func runDir(ctx context.Context, root, dir string, names, extra []string, dryRun
 
 	pattern := "./" + filepath.ToSlash(rel)
 	run := `^(` + strings.Join(names, "|") + `)$`
+
+	// Skip a package the current build tags cannot build; see buildable.
+	if !buildable(ctx, m, pattern) {
+		fmt.Fprintf(os.Stderr, "skipping %s: no buildable Go files with the current flags\n", pattern)
+
+		return true
+	}
 
 	args := append([]string{"test"}, extra...)
 	args = append(args, "-run", run, pattern)
