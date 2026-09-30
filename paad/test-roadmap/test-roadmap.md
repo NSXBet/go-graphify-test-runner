@@ -78,7 +78,7 @@ Catches:  `buildState` not truncating the diff (so a large diff blows the
           miscounting the selected total.
 Produces: internal/cmd/root_test.go
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 955d603 (negate a condition)
 
 ## Phase 7: Real git diff integration
 
