@@ -171,17 +171,23 @@ keep working (`-- -race -count=1 -v`; `-run` is managed by the tool).
 
 ### `--all` — use it as `go test`
 
-`--all` skips the diff, the code graph and the model entirely and runs
-`go test ./...` from the repository root. It needs no `OPENROUTER_API_KEY` and
-no Grove index, so one command covers both cases:
+`--all` skips the diff, the code graph and the model, and forwards to `go test`
+from the repository root. It needs no `OPENROUTER_API_KEY` and no Grove index,
+so one command covers both cases:
 
 ```bash
-smart-test-runner --all      # every test, like `go test ./...`
-smart-test-runner            # only the tests the change can affect
+smart-test-runner --all                     # every test (go test ./...)
+smart-test-runner                           # only the tests the change can affect
+
+smart-test-runner --all -- ./pkg/mine       # just one package
+smart-test-runner --all -- -run TestLogin   # one test, across all packages
+smart-test-runner --all -- -race -count=1   # with flags
 ```
 
-`--dry-run`, `--json` and `--` passthrough all work with `--all`; under `--json`
-the document carries `"all": true`.
+Everything after `--` is forwarded verbatim; `./...` is only appended when you
+have not named a target yourself, so an explicit package or `-run` filter is
+never overridden. `--dry-run` and `--json` compose (the document carries
+`"all": true`).
 
 ### `--verbose` — auditing the decision
 

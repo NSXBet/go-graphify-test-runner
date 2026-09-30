@@ -1,6 +1,7 @@
 package gotest
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -157,5 +158,33 @@ func TestIsExcluded(t *testing.T) {
 		if got := isExcluded(path); got != want {
 			t.Errorf("isExcluded(%q) = %v want %v", path, got, want)
 		}
+	}
+}
+
+func TestRunAllArgsForwardedVerbatim(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra []string
+		want  string
+	}{
+		{"bare defaults to everything", nil, "go test ./..."},
+		{"flags get the default target", []string{"-race", "-count=1"}, "go test -race -count=1 ./..."},
+		{"a -run filter still spans all packages", []string{"-run", "TestFoo"}, "go test -run TestFoo ./..."},
+		{"an explicit package is not overridden", []string{"./pkg/mine"}, "go test ./pkg/mine"},
+		{"explicit package plus flags", []string{"-race", "./pkg/mine"}, "go test -race ./pkg/mine"},
+		{"a directory target", []string{"pkg/mine"}, "go test pkg/mine"},
+		{"a single file target", []string{"pkg/mine/x_test.go"}, "go test pkg/mine/x_test.go"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+
+			RunAll(t.Context(), t.TempDir(), tt.extra, true, &buf)
+
+			if got := strings.TrimSpace(buf.String()); got != tt.want {
+				t.Fatalf("command = %q want %q", got, tt.want)
+			}
+		})
 	}
 }

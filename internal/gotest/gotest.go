@@ -170,16 +170,23 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 	return code
 }
 
-// RunAll runs the whole test suite (`go test <extra...> ./...`) from the
-// repository root, with no -run filter and no per-package grouping. It backs
-// --all, where the tool is a passthrough to go test rather than a selector.
+// RunAll runs the test suite from the repository root with no diff, graph or
+// -run filter — the --all path, where the tool is a passthrough to go test
+// rather than a selector.
+//
+// Args are forwarded verbatim so the caller keeps every go test capability:
+// flags (`-race -count=1`), a -run filter, package patterns, or a specific
+// directory. Only when no package target is given does it default to `./...`,
+// which is what makes a bare `--all` mean "everything".
 func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out io.Writer) int {
 	if out == nil {
 		out = os.Stdout
 	}
 
 	args := append([]string{"test"}, extra...)
-	args = append(args, "./...")
+	if !hasPackageTarget(extra) {
+		args = append(args, "./...")
+	}
 
 	if dryRun {
 		fmt.Fprintln(out, "go "+strings.Join(args, " "))
@@ -197,6 +204,29 @@ func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out i
 	}
 
 	return 0
+}
+
+// hasPackageTarget reports whether the go test args already name what to run.
+//
+// Deliberately narrow: a package pattern is an absolute or relative path
+// (starts with . / ~ or contains a /), or a single .go file. A bare word is NOT
+// treated as a target, because that is how a flag value looks —
+// `-run TestFoo` must still get a `./...` appended, and `-race` must not be
+// mistaken for a package. This is what keeps `--all -- ./pkg/mine` verbatim
+// while a bare `--all` or `--all -- -race` means everything.
+func hasPackageTarget(args []string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			continue
+		}
+
+		if strings.HasPrefix(a, ".") || strings.HasPrefix(a, "/") || strings.HasPrefix(a, "~") ||
+			strings.Contains(a, "/") || strings.HasSuffix(a, ".go") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // runDir runs one package's selected tests; returns false on failure.
