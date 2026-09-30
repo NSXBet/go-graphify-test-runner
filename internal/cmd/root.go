@@ -23,7 +23,6 @@ import (
 const (
 	defaultThreshold = 0.5
 	shaShortLen      = 12
-	maxNamesShown    = 40
 )
 
 // options holds the flag values for one invocation.
@@ -425,34 +424,95 @@ func buildState(mb string, files []string, diff string) string {
 }
 
 // promptR1 renders the per-test-file question.
-func promptR1(path, dir string, sameDir bool, names, reaches []string) string {
+func promptR1(path, dir string, sameDir bool, names []string, reaches []impact.Reach) string {
 	same := "no"
 	if sameDir {
 		same = "yes"
 	}
 
-	if len(names) > maxNamesShown {
-		names = append(names[:maxNamesShown], "…")
+	var b strings.Builder
+
+	reach := renderReaches(reaches)
+
+	fmt.Fprintf(&b, "Should Go test file `%s` be run to validate this change? Answer yes if any test in it likely exercises changed code or behavior.\n", path)
+	fmt.Fprintf(&b, "Package dir: %s (same directory as a changed file: %s).\n", dir, same)
+	// The reach evidence is the signal; the test-name list is filler. Budget it
+	// against the room left after the fixed parts, so a package with many tests
+	// cannot push the evidence out of the prompt.
+	fmt.Fprintf(&b, "Tests: %s.\n", fitNames(names, decide.MaxInstrChars-(b.Len()+len(reach)+len("Tests: .\n"))))
+	b.WriteString(reach)
+
+	return b.String()
+}
+
+// fitNames joins names to fit within budget bytes, dropping names (and marking
+// the elision) rather than letting the list push other prompt content out.
+func fitNames(names []string, budget int) string {
+	if budget <= 0 {
+		return "…"
 	}
 
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "Should Go test file `%s` be run to validate this change? Answer yes if any test in it likely exercises changed code or behavior.\n", path)
-	fmt.Fprintf(&b, "Package dir: %s (same directory as a changed file: %s).\n", dir, same)
-	fmt.Fprintf(&b, "Tests: %s.\n", strings.Join(names, ", "))
-	fmt.Fprintf(&b, "Calls into these changed files: %s.\n", orNone(reaches))
+	for i, n := range names {
+		add := n
+		if i > 0 {
+			add = ", " + n
+		}
+
+		if b.Len()+len(add) > budget {
+			return b.String() + ", …"
+		}
+
+		b.WriteString(add)
+	}
 
 	return b.String()
 }
 
 // promptR2 renders the per-test-function question.
-func promptR2(path string, fn gotest.Func, reaches []string) string {
+func promptR2(path string, fn gotest.Func, reaches []impact.Reach) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Should test `%s` in `%s` be run to validate this change? Answer yes if it likely exercises changed code or behavior.\n", fn.Name, path)
-	fmt.Fprintf(&b, "Calls into these changed files: %s.\n", orNone(reaches))
+	b.WriteString(renderReaches(reaches))
 	b.WriteString("Source:\n")
 	b.WriteString(fn.Src)
+
+	return b.String()
+}
+
+// renderReaches renders how a test file reaches the changed files. Direct call
+// edges are the strong signal and are listed per changed file; transitive-only
+// reaches are summarised, since on a leaf package nearly every dependent
+// transitively reaches it.
+func renderReaches(reaches []impact.Reach) string {
+	if len(reaches) == 0 {
+		return "Does not reach any changed file (call graph, transitively).\n"
+	}
+
+	var b strings.Builder
+
+	var direct, transitive []string
+
+	for _, r := range reaches {
+		switch {
+		case len(r.Direct) > 0:
+			direct = append(direct, fmt.Sprintf("%s via %s", r.File, strings.Join(r.Direct, ", ")))
+		default:
+			transitive = append(transitive, r.File)
+		}
+	}
+
+	if len(direct) > 0 {
+		fmt.Fprintf(&b, "Calls directly into changed files: %s.\n", strings.Join(direct, "; "))
+	} else {
+		b.WriteString("Calls directly into changed files: none.\n")
+	}
+
+	if len(transitive) > 0 {
+		fmt.Fprintf(&b, "Reaches (transitively only, no direct call): %s.\n", strings.Join(transitive, ", "))
+	}
 
 	return b.String()
 }

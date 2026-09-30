@@ -6,6 +6,7 @@ import (
 
 	"github.com/NSXBet/go-smart-test-runner/internal/decide"
 	"github.com/NSXBet/go-smart-test-runner/internal/gotest"
+	"github.com/NSXBet/go-smart-test-runner/internal/impact"
 )
 
 func TestTruncate(t *testing.T) {
@@ -68,9 +69,10 @@ func TestBuildStateTruncatesDiff(t *testing.T) {
 }
 
 func TestPromptR1(t *testing.T) {
-	got := promptR1("pkg/a_test.go", "pkg", true, []string{"TestA"}, []string{"A()"})
+	got := promptR1("pkg/a_test.go", "pkg", true, []string{"TestA"},
+		[]impact.Reach{{File: "pkg/a.go", Direct: []string{"a.Add"}}})
 
-	for _, want := range []string{"pkg/a_test.go", "same directory as a changed file: yes", "TestA", "A()"} {
+	for _, want := range []string{"pkg/a_test.go", "same directory as a changed file: yes", "TestA", "a.Add"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("promptR1 missing %q:\n%s", want, got)
 		}
@@ -83,22 +85,65 @@ func TestPromptR1(t *testing.T) {
 }
 
 func TestPromptR1CapsNames(t *testing.T) {
-	names := make([]string, 0, maxNamesShown+10)
-	for i := range maxNamesShown + 10 {
-		names = append(names, string(rune('A'+i%26)))
+	names := make([]string, 0, 60)
+	for i := range 60 {
+		names = append(names, "TestSomeReasonablyLongName"+string(rune('A'+i%26)))
 	}
 
 	got := promptR1("pkg/a_test.go", "pkg", false, names, nil)
 	if !strings.Contains(got, "…") {
 		t.Fatalf("promptR1 did not cap names:\n%s", got)
 	}
+
+	if len(got) > decide.MaxInstrChars {
+		t.Fatalf("promptR1 exceeds the instruction cap: %d", len(got))
+	}
+}
+
+// TestPromptR1KeepsEvidenceWithManyTests is the regression guard for the real
+// bug: a package with many tests used to spend the whole instruction budget on
+// the name list, so the reach evidence was truncated away entirely.
+func TestPromptR1KeepsEvidenceWithManyTests(t *testing.T) {
+	names := make([]string, 0, 60)
+	for i := range 60 {
+		names = append(names, "TestAVeryLongDescriptiveTestNameIndeed"+string(rune('A'+i%26)))
+	}
+
+	reaches := []impact.Reach{{File: "pkg/envx/detector.go", Direct: []string{"envx.IsDeployed"}}}
+
+	got := truncate(promptR1("pkg/a_test.go", "pkg", false, names, reaches), decide.MaxInstrChars)
+	if !strings.Contains(got, "Calls directly into changed files") {
+		t.Fatalf("evidence truncated away by the name list:\n%s", got)
+	}
+
+	if !strings.Contains(got, "envx.IsDeployed") {
+		t.Fatalf("direct call missing:\n%s", got)
+	}
+}
+
+func TestFitNamesRespectsBudget(t *testing.T) {
+	names := []string{"TestAlpha", "TestBeta", "TestGamma"}
+
+	if got := fitNames(names, 1000); got != "TestAlpha, TestBeta, TestGamma" {
+		t.Fatalf("fitNames generous budget = %q", got)
+	}
+
+	got := fitNames(names, 12)
+	if len(got) > 14 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("fitNames tight budget = %q", got)
+	}
+
+	if got := fitNames(names, 0); got != "…" {
+		t.Fatalf("fitNames zero budget = %q", got)
+	}
 }
 
 func TestPromptR2(t *testing.T) {
 	fn := gotest.Func{Name: "TestAdd", Src: "func TestAdd(t *testing.T) {}"}
-	got := promptR2("pkg/a_test.go", fn, []string{"Add()"})
+	got := promptR2("pkg/a_test.go", fn,
+		[]impact.Reach{{File: "pkg/a.go", Direct: []string{"a.Add"}}})
 
-	for _, want := range []string{"TestAdd", "pkg/a_test.go", "Add()", fn.Src} {
+	for _, want := range []string{"TestAdd", "pkg/a_test.go", "a.Add", fn.Src} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("promptR2 missing %q:\n%s", want, got)
 		}

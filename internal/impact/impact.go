@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,16 +25,21 @@ import (
 // IndexDir is the directory Grove writes its SQLite index into.
 const IndexDir = ".grove"
 
+// callSite is one call Grove recorded inside a symbol.
+type callSite struct {
+	Callee string `json:"callee"`
+}
+
 // IndexedNode is one symbol Grove reports as impacted by a file.
 type IndexedNode struct {
-	FilePath  string `json:"filePath"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Signature string `json:"signature"`
-	Span      struct {
-		Start int `json:"start"`
-		End   int `json:"end"`
-	} `json:"span"`
+	FilePath      string     `json:"filePath"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`
+	Signature     string     `json:"signature"`
+	Imports       []string   `json:"imports"`
+	CallSites     []callSite `json:"callSites"`
+	RawText       string     `json:"rawText"`
+	QualifiedName string     `json:"qualifiedName"`
 }
 
 // impactResponse is the JSON shape of `grove impact`.
@@ -41,15 +47,24 @@ type impactResponse struct {
 	Nodes []IndexedNode `json:"nodes"`
 }
 
+// Reach records how a file reaches a changed file: directly (a named call into
+// the changed package) or transitively (via other symbols).
+type Reach struct {
+	File string
+	// Direct lists the call edges into the changed file's package, e.g.
+	// "envx.IsDeployed". Empty means the reach is transitive only.
+	Direct []string
+}
+
 // Graph is the Grove-backed view of the repository.
 type Graph struct {
 	root string
 
-	// reachers maps an impacted file to the changed files it reaches, built by
-	// running `grove impact` once per changed file. Grove's `impact` answers
+	// reachers maps an impacted file to how it reaches each changed file, built
+	// by running `grove impact` once per changed file. Grove's `impact` answers
 	// "what reaches this file", so the query direction is changed-file ->
 	// impacted-file; the map is then read backwards for a test file.
-	reachers map[string][]string
+	reachers map[string]map[string]Reach
 }
 
 // NativeEnv opts into Grove's native type analyzer. It is off by default: the
@@ -95,11 +110,17 @@ func Load(_ context.Context, root string) (*Graph, error) {
 		return nil, fmt.Errorf("grove index missing under %s (%s) - run grove index", root, IndexDir)
 	}
 
-	return &Graph{root: root, reachers: map[string][]string{}}, nil
+	return &Graph{root: root, reachers: map[string]map[string]Reach{}}, nil
 }
 
 // IndexChanged records which files reach each changed path, by running
 // `grove impact` once per changed file. Call it before reading Reaches.
+//
+// A node counts as a *direct* reacher when one of its call sites names a symbol
+// in the changed file's package (envx.IsDeployed); otherwise it reaches the
+// file transitively through other symbols. Keeping the two apart is the point:
+// on a leaf package like envx nearly every dependent transitively reaches it,
+// so a flat list buries the few hundred direct callers.
 func (g *Graph) IndexChanged(ctx context.Context, changed []string) error {
 	for _, file := range changed {
 		nodes, err := g.impactFile(ctx, file)
@@ -107,33 +128,94 @@ func (g *Graph) IndexChanged(ctx context.Context, changed []string) error {
 			return err
 		}
 
-		for _, n := range nodes {
+		pkg := path.Dir(file)
+
+		for i := range nodes {
+			n := &nodes[i]
 			if n.FilePath == "" || n.FilePath == file {
 				continue
 			}
 
-			g.reachers[n.FilePath] = append(g.reachers[n.FilePath], file)
+			if g.reachers[n.FilePath] == nil {
+				g.reachers[n.FilePath] = map[string]Reach{}
+			}
+
+			r := g.reachers[n.FilePath][file]
+			r.File = file
+			r.Direct = append(r.Direct, directCalls(n, pkg)...)
+			g.reachers[n.FilePath][file] = r
 		}
 	}
 
 	return nil
 }
 
-// Reaches returns the changed files that path (transitively) reaches.
-func (g *Graph) Reaches(path string) []string {
-	return capped(g.reachers[path])
+// directCalls returns the call sites in n that name a symbol in pkg, e.g.
+// "envx.IsDeployed" for pkg == "pkg/envx".
+func directCalls(n *IndexedNode, pkg string) []string {
+	// envx == the package's base name for pkg/envx.
+	base := path.Base(pkg)
+
+	var out []string
+
+	for _, c := range n.CallSites {
+		if strings.HasPrefix(c.Callee, base+".") {
+			out = append(out, c.Callee)
+		}
+	}
+
+	return out
+}
+
+// Reaches returns, per changed file, how path reaches it. Sorted for stability.
+func (g *Graph) Reaches(file string) []Reach {
+	byFile := g.reachers[file]
+	if byFile == nil {
+		return nil
+	}
+
+	out := make([]Reach, 0, len(byFile))
+	for _, r := range byFile {
+		sort.Strings(r.Direct)
+		r.Direct = cappedslice(r.Direct)
+		out = append(out, r)
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		// Direct reachers first: they are the stronger evidence.
+		if (len(out[i].Direct) > 0) != (len(out[j].Direct) > 0) {
+			return len(out[i].Direct) > 0
+		}
+
+		return out[i].File < out[j].File
+	})
+
+	if len(out) > evidenceCap {
+		out = append(out[:evidenceCap], Reach{File: "…"})
+	}
+
+	return out
+}
+
+// cappedslice truncates a label list to evidenceCap.
+func cappedslice(in []string) []string {
+	if len(in) > evidenceCap {
+		return append(in[:evidenceCap], "…")
+	}
+
+	return in
 }
 
 // impactFile runs `grove impact <path>` and returns the symbols that reach it.
-func (g *Graph) impactFile(ctx context.Context, path string) ([]IndexedNode, error) {
-	out, err := g.run(ctx, "impact", path, ".")
+func (g *Graph) impactFile(ctx context.Context, file string) ([]IndexedNode, error) {
+	out, err := g.run(ctx, "impact", file, ".")
 	if err != nil {
 		return nil, err
 	}
 
 	var resp impactResponse
 	if jerr := json.Unmarshal(out, &resp); jerr != nil {
-		return nil, fmt.Errorf("grove impact %s: decode: %w", path, jerr)
+		return nil, fmt.Errorf("grove impact %s: decode: %w", file, jerr)
 	}
 
 	return resp.Nodes, nil

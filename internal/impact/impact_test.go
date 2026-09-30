@@ -46,3 +46,19 @@ func TestCappedSortsDedupsAndTruncates(t *testing.T) {
 		t.Fatalf("capped did not truncate with an ellipsis: len=%d last=%q", len(got), got[len(got)-1])
 	}
 }
+
+func TestDirectCallsMatchesPackagePrefix(t *testing.T) {
+	n := IndexedNode{
+		FilePath:  "pkg/logx/default.go",
+		CallSites: []callSite{{Callee: "envx.IsDeployed"}, {Callee: "os.Getenv"}, {Callee: "envx.DetectSkin"}},
+	}
+
+	got := directCalls(&n, "pkg/envx")
+	if len(got) != 2 || got[0] != "envx.IsDeployed" || got[1] != "envx.DetectSkin" {
+		t.Fatalf("directCalls = %v want the two envx calls", got)
+	}
+
+	if other := directCalls(&n, "pkg/other"); len(other) != 0 {
+		t.Fatalf("directCalls for an unrelated package = %v want none", other)
+	}
+}
