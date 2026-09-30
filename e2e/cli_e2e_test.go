@@ -161,18 +161,15 @@ func TestCLIDryRunSelectsOnlyAlpha(t *testing.T) {
 
 	got := string(out)
 
-	// The header reports how much was selected; one test file out of the two
-	// with one test selected is the signature of alpha being chosen and beta
-	// not.
-	if !strings.Contains(got, "2 test files considered, 1 selected") ||
-		!strings.Contains(got, "1 test considered, 1 selected") {
-		t.Fatalf("selection counts wrong:\n%s", got)
+	// The affected paragraph names the file alpha's one test lives in, with the
+	// count: the signature of alpha being chosen and beta not.
+	if !strings.Contains(got, "affected:") || !strings.Contains(got, "pkg/alpha/alpha_test.go (1 test)") {
+		t.Fatalf("alpha not reported as affected:\n%s", got)
 	}
 
-	// beta may still appear in the decision table as a rejected candidate — that
-	// is what the table is for — but it must not be selected, so no command may
-	// target it.
-	if strings.Contains(got, "./pkg/beta") {
+	// beta must not be selected, so no command may target it. (Without --verbose
+	// there is no decision table, so beta should not appear at all.)
+	if strings.Contains(got, "pkg/beta") {
 		t.Fatalf("beta selected despite no change:\n%s", got)
 	}
 

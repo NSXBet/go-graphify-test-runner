@@ -82,7 +82,6 @@ func TestRenderHeaderCountsSelection(t *testing.T) {
 	for _, want := range []string{
 		"smart-test-runner",
 		"abc123 · 1 changed files",
-		"2 test files considered, 1 selected · 1 test considered, 1 selected",
 		"running 1 test in 1 package",
 		"decisions cost $0.0010",
 	} {
@@ -246,10 +245,6 @@ func TestRenderHeaderPluralises(t *testing.T) {
 	renderHeader(&buf, rep, []gotest.Result{{Dir: "pkg", Funcs: []string{"TestA"}}}, false)
 
 	out := buf.String()
-	if !strings.Contains(out, "1 test file considered, 1 selected · 1 test considered, 1 selected") {
-		t.Fatalf("counts not pluralised correctly:\n%s", out)
-	}
-
 	if !strings.Contains(out, "running 1 test in 1 package") {
 		t.Fatalf("run line not pluralised correctly:\n%s", out)
 	}
@@ -334,5 +329,83 @@ func TestDryRunResultsIgnoresSkippedFirst(t *testing.T) {
 
 	if !dryRunResults(results) {
 		t.Fatal("dry run not detected behind a skipped first result")
+	}
+}
+
+// TestRenderSelectionParagraph proves the default report names the affected
+// files with a per-file test count instead of dumping the decision tables.
+func TestRenderSelectionParagraph(t *testing.T) {
+	var buf bytes.Buffer
+
+	rep := sampleReport()
+	rep.Rounds = []roundReport{
+		newRoundReport("round 1 (files)", map[string]float64{"pkg/a_test.go": 0.9, "pkg/b_test.go": 0.1}, 0.5),
+		newRoundReport("round 2 (tests)", map[string]float64{
+			"pkg/a_test.go::TestA": 0.9,
+			"pkg/a_test.go::TestB": 0.9,
+			"pkg/b_test.go::TestC": 0.1,
+		}, 0.5),
+	}
+
+	renderSelection(&buf, rep, nil, false)
+
+	out := buf.String()
+	if !strings.Contains(out, "affected:") {
+		t.Fatalf("missing affected line:\n%s", out)
+	}
+
+	// The count is per file, and a file whose only test was rejected is absent.
+	if !strings.Contains(out, "pkg/a_test.go (2 tests)") {
+		t.Fatalf("wrong per-file count:\n%s", out)
+	}
+
+	if strings.Contains(out, "pkg/b_test.go") {
+		t.Fatalf("file with no selected test listed:\n%s", out)
+	}
+
+	// No table without --verbose.
+	if strings.Contains(out, "Probability") || strings.Contains(out, "round 1 (files)") {
+		t.Fatalf("tables printed without --verbose:\n%s", out)
+	}
+}
+
+// TestRenderSelectionVerboseShowsTables proves --verbose prints the full
+// decision tables in place of the paragraph.
+func TestRenderSelectionVerboseShowsTables(t *testing.T) {
+	var buf bytes.Buffer
+
+	renderSelection(&buf, sampleReport(), nil, true)
+
+	out := buf.String()
+	if !strings.Contains(out, "Probability") || !strings.Contains(out, "Selected") {
+		t.Fatalf("verbose did not print the table:\n%s", out)
+	}
+
+	if strings.Contains(out, "affected:") {
+		t.Fatalf("paragraph printed under --verbose:\n%s", out)
+	}
+}
+
+// TestRenderSelectionMarksExcludedPackages proves a file the decision selected
+// but whose package the build tags exclude is counted separately rather than
+// listed as if it would run.
+func TestRenderSelectionMarksExcludedPackages(t *testing.T) {
+	var buf bytes.Buffer
+
+	rep := sampleReport()
+	rep.Rounds = []roundReport{
+		newRoundReport("round 1 (files)", map[string]float64{"e2e/x_test.go": 0.9}, 0.5),
+		newRoundReport("round 2 (tests)", map[string]float64{"e2e/x_test.go::TestX": 0.9}, 0.5),
+	}
+
+	renderSelection(&buf, rep, []gotest.Result{{Dir: "e2e", Skipped: true}}, false)
+
+	out := buf.String()
+	if strings.Contains(out, "e2e/x_test.go (1 test)") {
+		t.Fatalf("excluded file listed as if it would run:\n%s", out)
+	}
+
+	if !strings.Contains(out, "1 test file in packages the current build tags exclude") {
+		t.Fatalf("excluded file not accounted for:\n%s", out)
 	}
 }

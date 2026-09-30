@@ -161,7 +161,7 @@ smart-test-runner -- -race -count=1     # everything after -- goes to go test
 | `--model` | `jev-latest` | decision model (env `GOSMARTTESTRUNNER_SYSTEMONE_MODEL`) |
 | `--endpoint` | OpenRouter `alpha/decisions` | decisions endpoint (env `GOSMARTTESTRUNNER_SYSTEMONE_URL`) |
 | `--dry-run` | `false` | print selection and `go test` commands, do not run |
-| `--verbose` | `false` | print the full decisioning exchange to stderr |
+| `--verbose` | `false` | print the decision tables and the full model exchange |
 | `--json` | `false` | emit the whole result as JSON on stdout |
 | `--all` | `false` | run the whole suite (`go test ./...`) instead of selecting from the diff |
 | `--no-update-check` | `false` | skip the check for a newer release |
@@ -171,42 +171,46 @@ keep working (`-- -race -count=1 -v`; `-run` is managed by the tool).
 
 ### Reading the output
 
-A selected run prints what it is about to do, then the outcome — one line per
-package, and the captured `go test` output only when it says something the line
-above does not:
+The report reads top to bottom in the order the work happens: what was
+selected, what is about to run, and finally the result.
 
 ```
+affected: internal/cmd/report_test.go (15 tests) · internal/gotest/gotest_test.go (2 tests)
+  (3 test files in packages the current build tags exclude)
+
 smart-test-runner  dc54a1ab08a8 · 7 changed files
-20 test files considered, 7 selected · 49 tests considered, 14 selected
-running 14 tests in 1 package
-decisions cost $0.0021
+running 27 tests in 3 packages · 1 package skipped
+decisions cost $0.0031
 
   ↷ e2e  no buildable Go files
-  ✓ internal/cmd  6 tests  510ms
+  ✓ internal/cmd  16 tests  480ms
   ✗ pkg/alpha  1 test  990ms
 
 ✗ pkg/alpha
     --- FAIL: TestAdd (0.00s)
         alpha_test.go:5: boom
 
-FAIL  1 of 3 packages failed
+FAIL  1 of 3 packages failed · 1 skipped
 ```
 
-- `✓` passed, `✗` failed, `↷` skipped — a package whose files are all behind a
-  build tag the run does not enable (`e2e/`, `integration/`). Skipping is not a
-  failure.
+- **affected** names each test file the model selected, with how many of its
+  tests were picked. Files whose package the current build tags exclude are not
+  listed as if they would run — they are counted in the note below.
+- `✓` passed, `✗` failed, `↷` skipped. Skipping is not a failure.
+- The verdict accounts for the skipped package so it always adds up to the
+  package count in the header.
 - A bare pass prints only `ok pkg 0.1s`, which the package line already says, so
   it is not repeated. A forwarded `-v` (`=== RUN`) or a failure adds real detail
   and is printed indented under its package.
 - Colour is used only on a terminal; a pipe, a redirect or `NO_COLOR` renders
   plain text.
 
-A **skipped** package is counted in that verdict (`PASS  3 packages · 1
-skipped`) so the closing line always adds up to the package count in the
-header.
+### `--verbose` — auditing the decision
 
-The decisions behind the selection are a table on **stdout** after the outcome —
-result first, then the reasoning:
+`--verbose` replaces the one-line **affected** summary with the full decision
+tables — every candidate, its probability, and whether the threshold selected
+it — and then writes the whole exchange with the model to **stderr**. The
+output report itself stays on **stdout**.
 
 ```
 round 1 (files) 20 considered · 9 selected · threshold 0.50
@@ -223,8 +227,7 @@ considered and dropped, not only what ran. Round 2 repeats no file path: a
 blank cell means "same file as above".
 
 `--dry-run` reports the exact commands that would run instead of a pass/fail
-claim, since nothing executed. It still prints the decision tables, which are
-what selected those commands.
+claim, since nothing executed.
 
 ### `--all` — use it as `go test`
 
@@ -245,13 +248,6 @@ Everything after `--` is forwarded verbatim; `./...` is only appended when you
 have not named a target yourself, so an explicit package or `-run` filter is
 never overridden. `--dry-run` and `--json` compose (the document carries
 `"all": true`).
-
-### `--verbose` — auditing the decision
-
-`--verbose` writes the whole exchange with the decision model to **stderr**:
-the state text, every question and its instructions, each HTTP `POST`, the raw
-JSON response, and the parsed `noul` per question. Normal progress and the
-final report stay on **stdout**.
 
 ### `--json` — machine-readable result
 

@@ -125,9 +125,8 @@ func renderHeader(w io.Writer, rep *report, results []gotest.Result, dryRun bool
 		// per-package or per-test count to report — only what go test prints.
 		fmt.Fprintln(w, st.label.Render("whole suite (--all)"))
 	case rep.Rounds != nil:
-		filesAsked, filesSelected, testsAsked, testsSelected := selection(rep)
-		fmt.Fprintln(w, st.label.Render(fmt.Sprintf("%s considered, %d selected · %s considered, %d selected",
-			plural(filesAsked, "test file"), filesSelected, plural(testsAsked, "test"), testsSelected)))
+		_, _, _, testsSelected := selection(rep)
+
 		fmt.Fprintln(w, st.label.Render(planned(tests, packages, skipped, dryRun)))
 
 		if testsSelected == 0 {
@@ -152,21 +151,16 @@ func renderHeader(w io.Writer, rep *report, results []gotest.Result, dryRun bool
 // is larger: a selected test in a package the build tags exclude does not run,
 // and without saying so the two lines look like they disagree.
 func planned(tests, packages, skipped int, dryRun bool) string {
-	verb := "running"
-	if dryRun {
-		verb = "dry run:"
-	}
-
-	line := fmt.Sprintf("%s %s in %s", verb, plural(tests, "test"), plural(packages, "package"))
+	scope := fmt.Sprintf("%s in %s", plural(tests, "test"), plural(packages, "package"))
 	if skipped > 0 {
-		line += " · " + plural(skipped, "package") + " skipped"
+		scope += " · " + plural(skipped, "package") + " skipped"
 	}
 
 	if dryRun {
-		line += " would run"
+		return "dry run: would run " + scope
 	}
 
-	return line
+	return "running " + scope
 }
 
 // plural renders "1 test" / "3 tests".

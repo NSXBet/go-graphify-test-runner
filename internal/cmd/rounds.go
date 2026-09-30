@@ -3,12 +3,183 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+
+	"github.com/NSXBet/go-smart-test-runner/internal/gotest"
 )
+
+// renderSelection reports what the decision rounds chose.
+//
+// Normally that is one sentence naming each affected test file and how many of
+// its tests were picked — the question a user has is "what will run", and the
+// per-candidate probabilities are only needed to audit the decision. Under
+// --verbose the full tables are printed instead.
+func renderSelection(w io.Writer, rep *report, planned []gotest.Result, verbose bool) {
+	if verbose {
+		// The tables are the selection report under --verbose, so the trailing
+		// blank belongs to them.
+		renderRounds(w, rep)
+		fmt.Fprintln(w)
+
+		return
+	}
+
+	if len(rep.Rounds) == 0 {
+		return
+	}
+
+	st := newStyles(w)
+	files := affectedFiles(rep)
+
+	// A file the model selected but whose package the build tags exclude
+	// contributes no run, so say so rather than listing tests that will not
+	// happen.
+	skipped := skippedDirs(planned)
+
+	if len(files) == 0 {
+		fmt.Fprintln(w, st.label.Render("no test files affected"))
+
+		return
+	}
+
+	parts := make([]wrapped, 0, len(files))
+
+	for _, f := range files {
+		// A file in a package the build tags exclude will not run, so it is left
+		// out of the list and counted in the trailing note instead — repeating
+		// "skipped" per entry would bury the files that do run.
+		if skipped[path.Dir(f.name)] {
+			continue
+		}
+
+		parts = append(parts, wrapped{
+			plain:  f.name + " (" + plural(f.tests, "test") + ")",
+			styled: st.pkg.Render(f.name) + " " + st.label.Render("("+plural(f.tests, "test")+")"),
+		})
+	}
+
+	excluded := countExcluded(files, skipped)
+
+	if len(parts) == 0 {
+		fmt.Fprintln(w, st.label.Render("affected: ")+
+			st.skip.Render(fmt.Sprintf("none that will run (%s in packages the current build tags exclude)",
+				plural(excluded, "test file"))))
+		fmt.Fprintln(w)
+
+		return
+	}
+
+	writeWrapped(w, st.label.Render("affected: "), parts)
+
+	if excluded > 0 {
+		fmt.Fprintln(w, st.skip.Render(fmt.Sprintf("  (%s in packages the current build tags exclude)", plural(excluded, "test file"))))
+	}
+
+	fmt.Fprintln(w)
+}
+
+// countExcluded counts the affected files whose package will not run.
+func countExcluded(files []fileTests, skipped map[string]bool) int {
+	n := 0
+
+	for _, f := range files {
+		if skipped[path.Dir(f.name)] {
+			n++
+		}
+	}
+
+	return n
+}
+
+// wrapped is one segment of flowing text with its styled rendering.
+type wrapped struct {
+	plain  string
+	styled string
+}
+
+// selectionWidth is where the affected-files paragraph wraps.
+const selectionWidth = 100
+
+// writeWrapped flows the segments into indented lines no longer than
+// selectionWidth columns. Segments carry their own styles, and each style closes
+// with a reset, so a newline may be inserted between them safely.
+func writeWrapped(w io.Writer, prefix string, parts []wrapped) {
+	const indent = "  "
+
+	line := prefix
+	width := utf8.RuneCountInString(prefix)
+
+	for i, p := range parts {
+		sep, sepLen := "", 0
+		if i > 0 {
+			sep, sepLen = " · ", 3
+		}
+
+		if width+sepLen+utf8.RuneCountInString(p.plain) > selectionWidth && i > 0 {
+			fmt.Fprintln(w, line)
+			line, width = indent, len(indent)
+			sep, sepLen = "", 0
+		}
+
+		line += sep + p.styled
+		width += sepLen + utf8.RuneCountInString(p.plain)
+	}
+
+	fmt.Fprintln(w, line)
+}
+
+// skippedDirs is the set of package directories the plan will not run.
+func skippedDirs(planned []gotest.Result) map[string]bool {
+	out := map[string]bool{}
+
+	for i := range planned {
+		if planned[i].Skipped {
+			out[planned[i].Dir] = true
+		}
+	}
+
+	return out
+}
+
+// fileTests is one affected test file and how many of its tests were selected.
+type fileTests struct {
+	name  string
+	tests int
+}
+
+// affectedFiles counts the selected tests per file, sorted by path. It reads the
+// last round, which selects individual tests — "<file>::<Test>" keys.
+//
+// A file the model selected whose every test was then rejected contributes no
+// run, so it is omitted rather than shown with a zero count.
+func affectedFiles(rep *report) []fileTests {
+	counts := map[string]int{}
+
+	for _, k := range rep.Rounds[len(rep.Rounds)-1].Selected {
+		file, _, ok := strings.Cut(k, "::")
+		if !ok {
+			// Not a per-test key; nothing to count for this round's shape.
+			continue
+		}
+
+		counts[file]++
+	}
+
+	files := make([]fileTests, 0, len(counts))
+	for name, n := range counts {
+		files = append(files, fileTests{name: name, tests: n})
+	}
+
+	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
+
+	return files
+}
 
 // renderRounds prints the decision rounds as a table: every candidate the model
 // scored, its probability, and whether the threshold selected it.
@@ -23,9 +194,6 @@ func renderRounds(w io.Writer, rep *report) {
 	}
 
 	st := newStyles(w)
-
-	// One blank line separates the outcome above from the decisions below.
-	fmt.Fprintln(w)
 
 	for i, r := range rep.Rounds {
 		if i > 0 {

@@ -288,6 +288,8 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 	// cannot build, or it will disagree with the outcome below.
 	planned := gotest.Plan(ctx, f.root, selected, extra)
 
+	// What was selected (a paragraph, or the full tables under --verbose), then
+	// what is about to run. The outcome is printed last, after the tests.
 	emit(rep, opts, planned)
 
 	if len(selected) == 0 {
@@ -303,10 +305,7 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 			fmt.Fprint(os.Stderr, results[i].Output)
 		}
 	} else {
-		// Result first, then the decisions that produced it: the pass/fail
-		// picture is what a user needs, the score table is why.
 		renderOutcome(os.Stdout, results)
-		renderRounds(os.Stdout, rep)
 	}
 
 	// A skipped package is not a failure; see renderOutcome.
@@ -337,9 +336,11 @@ func emit(rep *report, opts *options, planned []gotest.Result) {
 		return
 	}
 
-	// The human report opens with what is about to run; the outcome follows
-	// once the tests finish.
+	// Identity and the run's scope first, then what was selected (a sentence, or
+	// the full decision tables under --verbose). The outcome is printed by the
+	// caller, last, once the tests have actually finished.
 	renderHeader(os.Stdout, rep, planned, opts.dryRun)
+	renderSelection(os.Stdout, rep, planned, opts.verbose)
 
 	if opts.verbose {
 		renderExchangesText(os.Stderr, rep)
