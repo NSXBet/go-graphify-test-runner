@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -89,7 +90,60 @@ func TestDecideServerError(t *testing.T) {
 
 	c := NewClient(srv.URL, "key", "jev-latest")
 
-	if _, err := c.Decide(context.Background(), "state", []Question{{Key: "k1"}}); err == nil {
+	_, err := c.Decide(context.Background(), "state", []Question{{Key: "k1"}})
+	if err == nil {
 		t.Fatal("want error")
+	}
+
+	// The error must name the failing status and surface the body, not just be
+	// "some error" — otherwise a wrong error would pass unnoticed.
+	if !strings.Contains(err.Error(), "decisions HTTP 500") {
+		t.Fatalf("error = %q, want it to mention the status", err)
+	}
+
+	if !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("error = %q, want it to include the response body", err)
+	}
+}
+
+func TestDecideBadRequestWithoutTokenLimit(t *testing.T) {
+	// A 400 that is NOT max_tokens_exceeded must surface as an error rather
+	// than being split or retried.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad model"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "key", "jev-latest")
+
+	_, err := c.Decide(context.Background(), "state", []Question{{Key: "k1"}, {Key: "k2"}})
+	if err == nil || !strings.Contains(err.Error(), "decisions HTTP 400") {
+		t.Fatalf("err = %v, want an HTTP 400 error", err)
+	}
+}
+
+func TestBatchPacking(t *testing.T) {
+	// Two questions whose combined size exceeds the budget must land in two
+	// batches; small questions share one batch.
+	big := strings.Repeat("x", maxRequestChars/2+1)
+	qs := []Question{{Key: "a", Instructions: big}, {Key: "b", Instructions: big}}
+
+	batches := batch("s", qs)
+	if len(batches) != 2 {
+		t.Fatalf("batches = %d want 2", len(batches))
+	}
+
+	small := []Question{{Key: "a"}, {Key: "b"}, {Key: "c"}}
+	if got := batch("s", small); len(got) != 1 {
+		t.Fatalf("small batches = %d want 1", len(got))
+	}
+}
+
+func TestBatchSingleQuestionAlwaysFits(t *testing.T) {
+	qs := []Question{{Key: "only", Instructions: strings.Repeat("x", MaxInstrChars)}}
+
+	if got := batch(strings.Repeat("s", MaxStateChars), qs); len(got) != 1 {
+		t.Fatalf("batches = %d want 1", len(got))
 	}
 }
