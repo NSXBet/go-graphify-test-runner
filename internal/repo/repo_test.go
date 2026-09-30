@@ -100,12 +100,43 @@ func TestChangedFilesSorted(t *testing.T) {
 		t.Fatalf("got %v want %v", got, want)
 	}
 
-	if _, hasDeleted := map[string][][2]int{"a": nil}["a"]; !hasDeleted {
-		t.Fatal("sanity: nil-range entry must still be present")
-	}
-
 	files := ChangedFiles(map[string][][2]int{"gone.go": nil})
 	if !reflect.DeepEqual(files, []string{"gone.go"}) {
 		t.Fatalf("deleted file missing: %v", files)
+	}
+}
+
+// TestParseUnifiedDiffNewFile covers a brand-new Go file, whose --- side is
+// /dev/null so the +++ path must still be recorded.
+func TestParseUnifiedDiffNewFile(t *testing.T) {
+	diff := "--- /dev/null\n+++ b/new.go\n@@ -0,0 +1,2 @@\n+a\n+b\n"
+
+	got := ParseUnifiedDiff(diff)
+	want := map[string][][2]int{"new.go": {{1, 2}}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestParseUnifiedDiffPathsWithSpaces(t *testing.T) {
+	diff := "+++ b/pkg/my file.go\n@@ -0,0 +3,1 @@\n+x\n"
+
+	got := ParseUnifiedDiff(diff)
+	want := map[string][][2]int{"pkg/my file.go": {{3, 3}}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestParseHunkRejectsMalformedHeader(t *testing.T) {
+	if _, ok := parseHunk("@@ not a hunk @@"); ok {
+		t.Fatal("malformed header accepted")
+	}
+
+	hunk, ok := parseHunk("@@ -1 +9,4 @@")
+	if !ok || hunk != [2]int{9, 12} {
+		t.Fatalf("got %v ok=%v want [9 12]", hunk, ok)
 	}
 }
