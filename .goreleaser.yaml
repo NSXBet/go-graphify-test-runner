@@ -73,13 +73,16 @@ homebrew_casks:
       name: nsx-bot
       email: nsx-bot@users.noreply.github.com
     commit_msg_template: "graphify-test-runner {{ .Version }}"
-    # Do not publish a cask for a pre-release (v1.2.3-rc1): it would become the
-    # "latest" brew install for a build the stable channel should not serve.
+    # Pre-releases (v1.2.3-rc1) skip the cask: it would become the "latest"
+    # brew install for a build the stable channel should not serve.
     skip_upload: "{{ with .Prerelease }}true{{ end }}"
-    # The binary is unsigned; Homebrew would quarantine it on first run.
+    # The cask ships linux and darwin binaries (goreleaser emits on_macos and
+    # on_linux stanzas). The binary is unsigned, so macOS quarantines it on
+    # first run; strip that only on macOS — /usr/bin/xattr does not exist on
+    # Linux, so an unguarded postflight breaks the Linux install.
     hooks:
       post:
         install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+          if OS.mac? && system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/graphify-test-runner"]
           end

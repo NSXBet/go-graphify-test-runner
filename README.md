@@ -11,13 +11,14 @@ via `go test -run`.
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install NSXBet/tap/graphify-test-runner
+brew install nsxbet/tap/graphify-test-runner
 ```
 
-Homebrew-managed installs update with `brew upgrade graphify-test-runner` — the
-tool detects a Homebrew install (Cellar/Caskroom path) and tells you so. Formula
-is published to [`NSXBet/homebrew-tap`](https://github.com/NSXBet/homebrew-tap)
-by the release workflow.
+Published to the org tap [`NSXBet/homebrew-tap`](https://github.com/NSXBet/homebrew-tap)
+(the same tap as `aihub`, `tasks`, `conduit-agent`). Homebrew-managed installs
+update with `brew upgrade graphify-test-runner` — the tool detects a Homebrew
+install (Cellar/Caskroom path) and prints that command. Pre-releases are not
+published to the tap.
 
 ### Install script (macOS / Linux)
 
