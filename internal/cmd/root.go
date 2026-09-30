@@ -4,7 +4,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -72,8 +71,8 @@ func newRootCmd() *cobra.Command {
 	f.StringVar(&opts.repo, "repo", ".", "repository path")
 	f.StringVar(&opts.base, "base", "origin/main", "base ref for merge-base")
 	f.Float64Var(&opts.threshold, "threshold", defaultThreshold, "noul >= threshold means yes")
-	f.StringVar(&opts.model, "model", "jev-latest", "decision model")
-	f.StringVar(&opts.endpoint, "endpoint", "https://openrouter.ai/api/alpha/decisions", "decisions endpoint")
+	f.StringVar(&opts.model, "model", modelFromEnv(), "decision model (env "+envSystemOneModel+")")
+	f.StringVar(&opts.endpoint, "endpoint", endpointFromEnv(), "decisions endpoint (env "+envSystemOneURL+")")
 	f.BoolVar(&opts.dryRun, "dry-run", false, "print selection and go test commands, do not run")
 	f.BoolVar(&opts.verbose, "verbose", false, "print the full decisioning exchange with the decision model to stderr, for auditing")
 	f.BoolVar(&opts.json, "json", false, "emit the full result (selection, scores, and — with --verbose — the judging) as JSON on stdout")
@@ -95,16 +94,7 @@ func Execute() {
 
 // apiKey resolves the bearer token for the configured endpoint.
 func apiKey(endpoint string) (string, error) {
-	key := os.Getenv("OPENROUTER_API_KEY")
-	if key == "" && strings.Contains(endpoint, "ai-llm-gateway.fbr.land") {
-		key = os.Getenv("AIHUB_TOKEN")
-	}
-
-	if key == "" {
-		return "", errors.New("OPENROUTER_API_KEY not set")
-	}
-
-	return key, nil
+	return resolveToken(endpoint)
 }
 
 // facts is everything resolved before the decision rounds.

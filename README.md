@@ -86,6 +86,36 @@ graphify-test-runner upgrade        # reinstall the latest release via go instal
 - `GRAPHIFY_TEST_RUNNER_UPDATE_API` overrides the release API root (mirrors).
 - `upgrade` validates the tag before shelling out to `go install`.
 
+### Configuration
+
+The SystemOne (decisions) integration is fully configurable by environment —
+nothing is hardcoded:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL` | OpenRouter `https://openrouter.ai/api/alpha/decisions` | decisions endpoint |
+| `GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL` | `jev-latest` | decision model |
+| `GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN` | `OPENROUTER_API_KEY`, else `AIHUB_TOKEN` against the AI Hub gateway | bearer token |
+
+Precedence is **flag > env > default** for URL and model. A bare base URL (no
+path) gets `/api/alpha/decisions` appended, so
+`GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL=https://ai-llm-gateway.fbr.land` works as-is.
+
+The token has no flag — secrets should not land in shell history or process
+args. Resolution order: `GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN`, then
+`OPENROUTER_API_KEY`, then `AIHUB_TOKEN` (only when the endpoint is the AI Hub
+gateway, so it is never sent to OpenRouter).
+
+```bash
+# defaults — nothing set, uses OpenRouter + OPENROUTER_API_KEY
+graphify-test-runner --base main
+
+# point at a self-hosted gateway
+export GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL=https://ai-llm-gateway.fbr.land
+export GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL=jev-latest
+export GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=...
+```
+
 ## Releases
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml`, which lints, tests,
@@ -113,8 +143,8 @@ graphify-test-runner -- -race -count=1     # everything after -- goes to go test
 | `--repo` | `.` | repository path |
 | `--base` | `origin/main` | base ref for `merge-base` |
 | `--threshold` | `0.5` | `noul >= threshold` means run it |
-| `--model` | `jev-latest` | decision model |
-| `--endpoint` | OpenRouter `alpha/decisions` | decisions endpoint |
+| `--model` | `jev-latest` | decision model (env `GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL`) |
+| `--endpoint` | OpenRouter `alpha/decisions` | decisions endpoint (env `GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL`) |
 | `--dry-run` | `false` | print selection and `go test` commands, do not run |
 | `--verbose` | `false` | print the full decisioning exchange to stderr |
 | `--json` | `false` | emit the whole result as JSON on stdout |

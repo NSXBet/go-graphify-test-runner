@@ -359,3 +359,79 @@ func TestCLIJSONWithDryRun(t *testing.T) {
 		t.Fatalf("dry-run command leaked into JSON stdout:\n%s", out)
 	}
 }
+
+// TestCLIUsesSystemOneEnvVars proves the run honours the
+// GOGRAPHIFYTESTRUNNER_SYSTEMONE_* environment variables with no flags: the
+// stub server is reached via the env URL, its model recorded, and the env
+// token accepted.
+func TestCLIUsesSystemOneEnvVars(t *testing.T) {
+	bin := buildBinary(t)
+
+	var gotModel string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model     string                     `json:"model"`
+			Questions map[string]json.RawMessage `json:"questions"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode: %v", err)
+
+			return
+		}
+
+		gotModel = req.Model
+
+		answers := map[string]map[string]float64{}
+		for k := range req.Questions {
+			answers[k] = map[string]float64{"noul": 0.1}
+		}
+
+		if err := json.NewEncoder(w).Encode(map[string]any{"answers": answers, "usage": map[string]float64{"cost": 0.0}}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	dir, base := fixture(t)
+	write(t, dir, "pkg/alpha/alpha.go", "package alpha\n\nfunc Add(a, b int) int { return a + b + 0 }\n")
+
+	_, _, code := runCLI(t, bin, []string{
+		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL=" + srv.URL,
+		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL=env-only-model",
+		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=env-token",
+		"GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK=1",
+	}, "--repo", dir, "--base", base)
+
+	if code != 0 {
+		t.Fatalf("exit = %d want 0", code)
+	}
+
+	if gotModel != "env-only-model" {
+		t.Fatalf("model sent = %q want env-only-model (env not applied)", gotModel)
+	}
+}
+
+// TestCLIEnvTokenRequiredWithoutFlags proves the documented token resolution:
+// with only GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN set (no OPENROUTER_API_KEY),
+// the run proceeds; with neither, it exits 2 naming the variables.
+func TestCLIEnvTokenRequiredWithoutFlags(t *testing.T) {
+	bin := buildBinary(t)
+
+	dir, base := fixture(t)
+
+	_, stderr, code := runCLI(t, bin, []string{
+		"OPENROUTER_API_KEY=",
+		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=",
+		"AIHUB_TOKEN=",
+	}, "--repo", dir, "--base", base)
+
+	if code != 2 {
+		t.Fatalf("exit = %d want 2 without a token", code)
+	}
+
+	if !strings.Contains(stderr, "GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN") {
+		t.Fatalf("error does not name the env var:\n%s", stderr)
+	}
+}

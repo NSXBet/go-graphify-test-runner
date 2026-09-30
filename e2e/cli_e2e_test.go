@@ -204,7 +204,8 @@ func TestCLINoChanges(t *testing.T) {
 	}
 }
 
-// TestCLIMissingKey proves the CLI refuses to run without a key.
+// TestCLIMissingKey proves the CLI refuses to run without any token, and the
+// error names the env vars that supply one.
 func TestCLIMissingKey(t *testing.T) {
 	bin := buildBinary(t)
 
@@ -212,11 +213,20 @@ func TestCLIMissingKey(t *testing.T) {
 
 	cmd := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base)
 
-	cmd.Env = append(os.Environ(), "OPENROUTER_API_KEY=", "AIHUB_TOKEN=")
+	cmd.Env = append(os.Environ(),
+		"OPENROUTER_API_KEY=",
+		"AIHUB_TOKEN=",
+		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=")
 
 	out, err := cmd.CombinedOutput()
-	if !strings.Contains(string(out), "OPENROUTER_API_KEY not set") || err == nil {
-		t.Fatalf("want a key error and nonzero exit; err=%v out=%s", err, out)
+	if err == nil {
+		t.Fatalf("want a nonzero exit without a token; out=%s", out)
+	}
+
+	for _, want := range []string{"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN", "OPENROUTER_API_KEY"} {
+		if !strings.Contains(string(out), want) {
+			t.Fatalf("error does not mention %s:\n%s", want, out)
+		}
 	}
 
 	var exitErr *exec.ExitError
