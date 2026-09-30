@@ -60,7 +60,7 @@ toolchain embeds (a `go install ...@<tag>` build), then `dev`.
 
 ## Staying up to date
 
-On a normal run the tool checks (once a day, cached) whether a newer release
+On a normal run the tool checks (cached for 15 minutes) whether a newer release
 exists and prints a one-line hint to stderr:
 
 ```

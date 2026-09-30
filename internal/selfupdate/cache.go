@@ -8,8 +8,10 @@ import (
 )
 
 // cacheTTL is how long a check result is trusted before checking again — keeps
-// the nudge from hitting GitHub on every invocation.
-const cacheTTL = 24 * time.Hour
+// the nudge from hitting GitHub on every invocation while staying responsive
+// to a release (15 minutes, so a fresh release is noticed within the quarter
+// hour rather than a day).
+const cacheTTL = 15 * time.Minute
 
 // File permissions for the cache directory and file.
 const (
