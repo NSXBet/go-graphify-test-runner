@@ -99,7 +99,7 @@ Catches:  `Run` building the wrong `go test -run` pattern (so a selected test
           the grouped-by-directory loop skipping a directory.
 Produces: internal/gotest/gotest_integration_test.go (build tag `//go:build integration`)
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 8cc5752 (alter a constant)
 
 ## Phase 9: Multi-batch decisions integration
 
