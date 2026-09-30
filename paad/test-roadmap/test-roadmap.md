@@ -119,4 +119,4 @@ Catches:  the assembled binary running the wrong tests for a change, or exiting
           what the real run selects.
 Produces: cmd/e2e_test.go (build tag `//go:build e2e`)
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 0def207 (alter a constant)
