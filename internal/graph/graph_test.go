@@ -2,6 +2,7 @@ package graph
 
 import (
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -56,5 +57,96 @@ func TestEvidence(t *testing.T) {
 
 	if !reflect.DeepEqual(indirect, []string{"A() via X()"}) {
 		t.Fatalf("indirect = %v", indirect)
+	}
+}
+
+func TestEvidenceDirect(t *testing.T) {
+	g := testGraph()
+
+	direct, indirect := g.Evidence([]string{"X"}, map[string]bool{"A": true})
+	if !reflect.DeepEqual(direct, []string{"A()"}) {
+		t.Fatalf("direct = %v want [A()]", direct)
+	}
+
+	if len(indirect) != 0 {
+		t.Fatalf("indirect = %v want empty", indirect)
+	}
+}
+
+func TestEvidenceCap(t *testing.T) {
+	g := &Graph{byID: map[string]*node{}, byFile: map[string][]*node{}, callees: map[string][]string{}}
+
+	changed := map[string]bool{}
+
+	for i := range 25 {
+		id := "n" + strconv.Itoa(i)
+		g.byID[id] = &node{ID: id, Label: "Fn" + strconv.Itoa(i) + "()"}
+		g.callees["caller"] = append(g.callees["caller"], id)
+		changed[id] = true
+	}
+
+	direct, _ := g.Evidence([]string{"caller"}, changed)
+	if len(direct) != evidenceCap+1 {
+		t.Fatalf("direct len = %d want %d (cap + ellipsis)", len(direct), evidenceCap+1)
+	}
+
+	if direct[len(direct)-1] != "…" {
+		t.Fatalf("last entry = %q want ellipsis", direct[len(direct)-1])
+	}
+}
+
+func TestNodeLineUnparsable(t *testing.T) {
+	if got := nodeLine(&node{SourceLocation: "nope"}); got != -1 {
+		t.Fatalf("nodeLine = %d want -1", got)
+	}
+
+	// A node with an unparsable line must never be marked changed.
+	g := &Graph{
+		byID:    map[string]*node{"bad": {ID: "bad", Label: "Bad()", SourceFile: "pkg/x.go", SourceLocation: "nope"}},
+		byFile:  map[string][]*node{"pkg/x.go": {{ID: "bad", Label: "Bad()", SourceFile: "pkg/x.go", SourceLocation: "nope"}}},
+		callees: map[string][]string{},
+	}
+
+	if changed := g.ChangedSymbols(map[string][][2]int{"pkg/x.go": {{1, 50}}}); len(changed) != 0 {
+		t.Fatalf("unparsable-line node marked changed: %v", changed)
+	}
+}
+
+func TestEnclosingNodeMarked(t *testing.T) {
+	// A change inside a function body (between B and the next declaration)
+	// must mark the enclosing function, not just the exact hit node.
+	g := testGraph()
+
+	changed := g.ChangedSymbols(map[string][][2]int{"pkg/a_test.go": {{31, 31}}})
+	if !changed["B"] {
+		t.Fatalf("enclosing node B not marked: %v", changed)
+	}
+}
+
+func TestNodeIDForAndFileCallers(t *testing.T) {
+	g := testGraph()
+
+	if id := g.NodeIDFor("pkg/a_test.go", "TestT"); id != "T" {
+		t.Fatalf("NodeIDFor = %q want T", id)
+	}
+
+	if id := g.NodeIDFor("pkg/a_test.go", "Missing"); id != "" {
+		t.Fatalf("NodeIDFor missing = %q want empty", id)
+	}
+
+	callers := g.FileCallers("pkg/a_test.go")
+	if len(callers) != 4 {
+		t.Fatalf("FileCallers = %v want 4 ids", callers)
+	}
+}
+
+func TestLabelsMissingNodeSkipped(t *testing.T) {
+	g := testGraph()
+
+	got := g.Labels(map[string]bool{"A": true, "ghost": true})
+	want := map[string][]string{"pkg/a_test.go": {"A()"}}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v want %v", got, want)
 	}
 }
