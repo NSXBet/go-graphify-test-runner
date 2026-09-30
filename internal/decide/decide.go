@@ -43,11 +43,16 @@ type request struct {
 }
 
 type response struct {
-	Answers map[string]struct {
+	ID       string `json:"id"`
+	Model    string `json:"model"`
+	Provider string `json:"provider"`
+	Answers  map[string]struct {
 		Noul float64 `json:"noul"`
 	} `json:"answers"`
 	Usage struct {
-		Cost float64 `json:"cost"`
+		InputTokens  int     `json:"input_tokens"`
+		OutputTokens int     `json:"output_tokens"`
+		Cost         float64 `json:"cost"`
 	} `json:"usage"`
 }
 
@@ -64,6 +69,7 @@ type Client struct {
 	key      string
 	model    string
 	cost     float64
+	verbose  io.Writer
 }
 
 // NewClient builds a client for the given endpoint, key and model.
@@ -76,6 +82,19 @@ func NewClient(endpoint, key, model string) *Client {
 	}
 }
 
+// SetVerbose turns on the decisioning audit trail, written to w. Nil disables
+// it (the default).
+func (c *Client) SetVerbose(w io.Writer) { c.verbose = w }
+
+// logf writes one audit line when verbose output is enabled.
+func (c *Client) logf(format string, args ...any) {
+	if c.verbose == nil {
+		return
+	}
+
+	fmt.Fprintf(c.verbose, "[decide] "+format+"\n", args...)
+}
+
 // Cost returns the accumulated usage cost in dollars.
 func (c *Client) Cost() float64 { return c.cost }
 
@@ -83,6 +102,14 @@ func (c *Client) Cost() float64 { return c.cost }
 // limit and splitting batches on max_tokens_exceeded.
 func (c *Client) Decide(ctx context.Context, state string, qs []Question) (map[string]float64, error) {
 	answers := map[string]float64{}
+
+	if c.verbose != nil {
+		c.logf("state (%d chars):\n%s", len(state), state)
+
+		for _, q := range qs {
+			c.logf("question %q:\n%s", q.Key, q.Instructions)
+		}
+	}
 
 	// ponytail: sequential batches; add a bounded worker pool if wall time matters
 	for _, b := range batch(state, qs) {
@@ -122,18 +149,29 @@ func batch(state string, qs []Question) [][]Question {
 }
 
 func (c *Client) decideBatch(ctx context.Context, state string, batch []Question, out map[string]float64) error {
+	keys := make([]string, 0, len(batch))
+	for _, q := range batch {
+		keys = append(keys, q.Key)
+	}
+
+	c.logf("POST %s model=%s state=%d chars questions=%d %v", c.endpoint, c.model, len(state), len(batch), keys)
+
 	body, code, err := c.post(ctx, state, batch)
 	if err != nil {
 		return err
 	}
 
 	if code == http.StatusBadRequest && strings.Contains(string(body), "max_tokens_exceeded") {
+		c.logf("HTTP 400 max_tokens_exceeded — splitting batch of %d", len(batch))
+
 		return c.splitAndRetry(ctx, state, batch, out)
 	}
 
 	if code < 200 || code >= 300 {
 		return fmt.Errorf("decisions HTTP %d: %s", code, body)
 	}
+
+	c.logf("HTTP %d: %s", code, strings.TrimSpace(string(body)))
 
 	return c.collect(body, batch, out)
 }
@@ -196,15 +234,21 @@ func (c *Client) collect(body []byte, batch []Question, out map[string]float64) 
 
 	c.cost += r.Usage.Cost
 
+	c.logf("model=%s provider=%s id=%s tokens in/out=%d/%d cost=$%.6f",
+		r.Model, r.Provider, r.ID, r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.Cost)
+
 	for _, q := range batch {
 		a, ok := r.Answers[q.Key]
 		if !ok {
 			fmt.Fprintf(os.Stderr, "warning: no answer for %s, running it\n", q.Key)
+			c.logf("  %-40s <missing> -> 1.00 (default: run)", q.Key)
+
 			out[q.Key] = 1.0
 
 			continue
 		}
 
+		c.logf("  %-40s noul=%.4f", q.Key, a.Noul)
 		out[q.Key] = a.Noul
 	}
 

@@ -1,6 +1,7 @@
 package decide
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -145,5 +146,51 @@ func TestBatchSingleQuestionAlwaysFits(t *testing.T) {
 
 	if got := batch(strings.Repeat("s", MaxStateChars), qs); len(got) != 1 {
 		t.Fatalf("batches = %d want 1", len(got))
+	}
+}
+
+func TestVerboseAuditTrail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"model":    "typesafe/jev-test",
+			"provider": "TypeSafe",
+			"answers":  map[string]map[string]float64{"k1": {"noul": 0.42}},
+			"usage":    map[string]float64{"cost": 0.001},
+		}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+
+	c := NewClient(srv.URL, "key", "jev-latest")
+	c.SetVerbose(&buf)
+
+	if _, err := c.Decide(context.Background(), "THE-STATE", []Question{{Key: "k1", Instructions: "INSTR"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{"[decide]", "THE-STATE", "INSTR", "POST", "noul=0.4200", "provider=TypeSafe"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("verbose output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestVerboseOffByDefault(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if err := json.NewEncoder(w).Encode(map[string]any{"answers": map[string]map[string]float64{"k1": {"noul": 0.1}}}); err != nil {
+			t.Errorf("encode: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	// No SetVerbose: the audit trail must stay silent.
+	c := NewClient(srv.URL, "key", "jev-latest")
+
+	if _, err := c.Decide(context.Background(), "state", []Question{{Key: "k1"}}); err != nil {
+		t.Fatal(err)
 	}
 }

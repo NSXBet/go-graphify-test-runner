@@ -34,6 +34,7 @@ type options struct {
 	model     string
 	endpoint  string
 	dryRun    bool
+	verbose   bool
 }
 
 // newRootCmd builds the root command with its flags bound to a fresh options.
@@ -66,6 +67,7 @@ func newRootCmd() *cobra.Command {
 	f.StringVar(&opts.model, "model", "jev-latest", "decision model")
 	f.StringVar(&opts.endpoint, "endpoint", "https://openrouter.ai/api/alpha/decisions", "decisions endpoint")
 	f.BoolVar(&opts.dryRun, "dry-run", false, "print selection and go test commands, do not run")
+	f.BoolVar(&opts.verbose, "verbose", false, "print the full decisioning exchange with the decision model to stderr, for auditing")
 
 	return rootCmd
 }
@@ -188,6 +190,10 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 	fmt.Fprintf(os.Stderr, "state: %d chars, changed files: %d, test files: %d\n", len(state), len(f.files), len(f.testFiles))
 
 	c := decide.NewClient(opts.endpoint, key, opts.model)
+	if opts.verbose {
+		c.SetVerbose(os.Stderr)
+	}
+
 	parsedFiles, r1qs := round1(f.root, f.g, f.changedIDs, f.testFiles, f.files)
 
 	r1, err := c.Decide(ctx, state, r1qs)

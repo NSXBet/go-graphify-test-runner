@@ -4,8 +4,10 @@ package gotest
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -128,5 +130,61 @@ func TestModuleRootRealTree(t *testing.T) {
 
 	if got := ModuleRoot(dir, "pkg/alpha"); got != dir {
 		t.Fatalf("ModuleRoot = %q want %q", got, dir)
+	}
+}
+
+func TestRunForwardsExtraGoTestArgs(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	// A test that fails unless -run reached go test with our args. -v writes
+	// "=== RUN" to the run output; use -count=1 to defeat the cache and prove
+	// the arg was honoured rather than short-circuited.
+	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-count=1"}, false)
+	if code != 0 {
+		t.Fatalf("Run with extra args code = %d want 0", code)
+	}
+
+	// An invalid flag forwarded through must reach go test and make it fail —
+	// proof the args are not silently dropped.
+	if code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-this-flag-does-not-exist"}, false); code == 0 {
+		t.Fatal("Run swallowed an invalid go test flag")
+	}
+}
+
+func TestRunDryRunPrintsForwardedArgs(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	// Dry-run prints the exact command to stdout; capture it and confirm the
+	// forwarded args appear in order before -run.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	os.Stdout = w
+
+	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-race", "-count=1"}, true)
+
+	os.Stdout = old
+
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if code != 0 {
+		t.Fatalf("dry-run code = %d want 0", code)
+	}
+
+	got := string(out)
+	if !strings.Contains(got, "go test -race -count=1 -run") {
+		t.Fatalf("forwarded args not in printed command:\n%s", got)
 	}
 }

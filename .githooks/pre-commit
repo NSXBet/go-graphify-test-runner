@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Pre-commit hook: format, test, lint.
+#
+# Fast, staged-scope checks only — full-tree work belongs in CI. Intelligent
+# tools (pre-commit, lefthook, husky) re-stage files a formatter rewrites; a
+# raw git hook cannot, so this hook checks formatting instead of silently
+# rewriting the index.
+#
+# Install: run `git config core.hooksPath .githooks` once per clone.
+# Bypass (emergency only): `git commit --no-verify`.
+#
+# Written for bash 3.2 (macOS default): no `mapfile`, no associative arrays.
+set -uo pipefail
+
+fail() {
+	printf '\npre-commit: %s\n' "$1" >&2
+	exit 1
+}
+
+# Determine the repository root even when run from a subdirectory.
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a git repository"
+cd "$root" || fail "cannot cd to $root"
+
+# Only Go-related staged changes matter here.
+staged="$(git diff --cached --name-only --diff-filter=ACM -- '*.go' 'go.mod' 'go.sum')"
+if [ -z "$staged" ]; then
+	exit 0
+fi
+
+# 1. Formatting — golangci-lint fmt --diff exits 0 even with a diff, so the
+#    presence of diff output (not the exit code) is the signal. Warning lines
+#    are the tool's own deprecation chatter and must not fail the commit.
+fmt_out="$(golangci-lint fmt --diff ./... 2>/dev/null | grep -Ev '^level=warning')"
+if [ -n "$fmt_out" ]; then
+	printf '%s\n' "$fmt_out" >&2
+	fail "formatting changes required — run: golangci-lint fmt ./..."
+fi
+
+# 2. Tests — unit tier on every commit; heavier tiers are the developer's call
+#    (run them with their build tags before pushing).
+go test ./... || fail "go tests failed"
+
+# 3. Lint — the strict NSX golangci-lint v2 config, full tree (the config is
+#    fast enough and --new-from-rev misses cross-file findings).
+golangci-lint run ./... || fail "golangci-lint reported issues"
+
+exit 0
