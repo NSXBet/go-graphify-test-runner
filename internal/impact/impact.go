@@ -159,10 +159,14 @@ func (g *Graph) indexOne(file string, nodes []IndexedNode) {
 	// sibling file: awsx/session_test.go exercises awsx/session.go, which calls
 	// envx.IsDeployed, so the test must not be graded transitive-only.
 	for impacted := range g.reachers {
-		if calls := callingPkgs[path.Dir(impacted)]; len(calls) > 0 {
-			r := g.reachers[impacted][file]
-			r.Direct = append(r.Direct, calls...)
+		calls := callingPkgs[path.Dir(impacted)]
+		if len(calls) == 0 {
+			continue
 		}
+
+		r := g.reachers[impacted][file]
+		r.Direct = append(r.Direct, calls...)
+		g.reachers[impacted][file] = r
 	}
 }
 

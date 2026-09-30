@@ -62,3 +62,39 @@ func TestDirectCallsMatchesPackagePrefix(t *testing.T) {
 		t.Fatalf("directCalls for an unrelated package = %v want none", other)
 	}
 }
+
+// TestIndexChangedGradesSiblingPackageCallDirect is the regression guard for a
+// discarded map write: the propagation of a package's direct calls to its other
+// impacted files appended to a copy and never stored it back, so every reacher
+// was graded transitive-only.
+func TestIndexChangedGradesSiblingPackageCallDirect(t *testing.T) {
+	g := &Graph{reachers: map[string]map[string]Reach{}}
+
+	nodes := []IndexedNode{
+		{FilePath: "pkg/awsx/session.go", CallSites: []callSite{{Callee: "envx.IsDeployed"}}},
+		{FilePath: "pkg/awsx/session_test.go"},
+		{FilePath: "pkg/other/thing.go"},
+	}
+
+	g.indexOne("pkg/envx/detector.go", nodes)
+
+	// The test file itself has no call site, but its package does.
+	got := g.Reaches("pkg/awsx/session_test.go")
+	if len(got) != 1 || got[0].File != "pkg/envx/detector.go" {
+		t.Fatalf("Reaches = %+v want one reach for pkg/envx/detector.go", got)
+	}
+
+	if len(got[0].Direct) == 0 {
+		t.Fatalf("sibling-package call not graded direct: %+v", got[0])
+	}
+
+	if got[0].Direct[0] != "envx.IsDeployed" {
+		t.Fatalf("Direct = %v want [envx.IsDeployed]", got[0].Direct)
+	}
+
+	// A file in an unrelated package must stay transitive-only.
+	other := g.Reaches("pkg/other/thing.go")
+	if len(other) != 1 || len(other[0].Direct) != 0 {
+		t.Fatalf("unrelated package graded direct: %+v", other)
+	}
+}
