@@ -18,6 +18,7 @@ import (
 	"github.com/NSXBet/go-graphify-test-runner/internal/gotest"
 	"github.com/NSXBet/go-graphify-test-runner/internal/graph"
 	"github.com/NSXBet/go-graphify-test-runner/internal/repo"
+	"github.com/NSXBet/go-graphify-test-runner/internal/version"
 )
 
 // Tunables that would otherwise read as bare magic numbers at their call sites.
@@ -71,6 +72,10 @@ func newRootCmd() *cobra.Command {
 	f.BoolVar(&opts.dryRun, "dry-run", false, "print selection and go test commands, do not run")
 	f.BoolVar(&opts.verbose, "verbose", false, "print the full decisioning exchange with the decision model to stderr, for auditing")
 	f.BoolVar(&opts.json, "json", false, "emit the full result (selection, scores, and — with --verbose — the judging) as JSON on stdout")
+
+	rootCmd.AddCommand(newVersionCmd())
+	rootCmd.Version = version.Get()
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
 
 	return rootCmd
 }

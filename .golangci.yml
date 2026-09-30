@@ -340,6 +340,11 @@ linters:
       - path: '(^|/)cmd/'
         linters: [gochecknoinits]
 
+      # The version package's `Version` string is an -ldflags -X target; a
+      # linker-injected value cannot live anywhere but a package-level var.
+      - path: '(^|/)internal/version/'
+        linters: [gochecknoglobals]
+
       # If you maintain the logx module itself, override here to allow direct zap construction:
       # - path: '^path/to/logx/internal/'
       #   linters: [forbidigo]

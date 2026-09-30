@@ -34,3 +34,6 @@ go.work.sum
 # graphify-test-runner artifacts
 graphify-out/
 /graphify-test-runner
+
+# goreleaser output
+dist/

@@ -8,11 +8,50 @@ via `go test -run`.
 
 ## Install
 
+### Install script (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NSXBet/go-graphify-test-runner/main/install.sh | sh
+```
+
+Downloads the release binary for your OS and architecture (linux/darwin ×
+amd64/arm64), verifies its SHA-256 against the release's `checksums.txt`, and
+installs it. Honours `INSTALL_DIR` (default `/usr/local/bin`, else
+`~/.local/bin`), `VERSION` (pin a tag), and `BASE_URL` (mirror). Windows users
+should take the `.zip` from the [releases page](https://github.com/NSXBet/go-graphify-test-runner/releases).
+
+### `go install`
+
 ```bash
 go install github.com/NSXBet/go-graphify-test-runner@latest
 ```
 
-Requires `graphify` on `PATH` and `OPENROUTER_API_KEY` in the environment.
+`@latest` resolves to the highest release tag, and the Go toolchain embeds that
+tag in the binary, so `graphify-test-runner version` reports the real version —
+no extra step needed.
+
+Either way, `graphify` must be on `PATH` and `OPENROUTER_API_KEY` set.
+
+## Version
+
+```bash
+graphify-test-runner version   # v1.2.3, or "dev" for a local build
+graphify-test-runner --version # same
+```
+
+The version comes from, in order: the value the release build injects
+(`-ldflags -X .../internal/version.Version`), then the module version the Go
+toolchain embeds (a `go install ...@<tag>` build), then `dev`.
+
+## Releases
+
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which lints, tests,
+and runs [GoReleaser](.goreleaser.yaml) to publish binaries for linux, darwin
+and windows on amd64 and arm64, plus `checksums.txt`.
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
 
 ## Usage
 
