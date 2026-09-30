@@ -19,6 +19,9 @@ type roundReport struct {
 
 // report is the whole run's audit record, rendered as text or JSON.
 type report struct {
+	// All is true under --all: the whole suite ran, with no diff, graph or
+	// decision rounds, so every other field is empty.
+	All          bool                `json:"all,omitempty"`
 	MergeBase    string              `json:"merge_base"`
 	ChangedFiles []string            `json:"changed_files"`
 	StateChars   int                 `json:"state_chars"`

@@ -435,3 +435,55 @@ func TestCLIEnvTokenRequiredWithoutFlags(t *testing.T) {
 		t.Fatalf("error does not name the env var:\n%s", stderr)
 	}
 }
+
+// TestCLIAllRunsWholeSuiteWithoutKey proves --all is a go test passthrough: it
+// runs every package, needs no API key and no grove index, and forwards args
+// after -- to go test.
+func TestCLIAllRunsWholeSuiteWithoutKey(t *testing.T) {
+	bin := buildBinary(t)
+
+	dir, _ := fixture(t)
+
+	// No OPENROUTER_API_KEY, no grove index: --all must not require either.
+	stdout, stderr, code := runCLI(t, bin, []string{"OPENROUTER_API_KEY="},
+		"--repo", dir, "--all", "--", "-v")
+
+	// beta's test fails deliberately in the fixture, so a whole-suite run exits
+	// non-zero - that it ran at all (=== RUN) is the point.
+	if !strings.Contains(stderr, "=== RUN") && !strings.Contains(stdout, "=== RUN") {
+		t.Fatalf("go test did not run under --all:\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+
+	if strings.Contains(stderr, "OPENROUTER_API_KEY") {
+		t.Fatalf("--all demanded an API key:\n%s", stderr)
+	}
+
+	if code == 0 {
+		t.Fatalf("--all exit = 0, want non-zero (beta's test fails on purpose)")
+	}
+}
+
+// TestCLIAllDryRunAndJSON proves --all composes with --dry-run and --json.
+func TestCLIAllDryRunAndJSON(t *testing.T) {
+	bin := buildBinary(t)
+
+	dir, _ := fixture(t)
+
+	stdout, _, code := runCLI(t, bin, nil, "--repo", dir, "--all", "--dry-run", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d want 0", code)
+	}
+
+	var doc struct {
+		All      bool                `json:"all"`
+		Selected map[string][]string `json:"selected"`
+	}
+
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("stdout not JSON: %v\n%s", err, stdout)
+	}
+
+	if !doc.All {
+		t.Fatalf("document does not report all=true: %s", stdout)
+	}
+}

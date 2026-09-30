@@ -193,3 +193,48 @@ func TestAdd(t *testing.T) { t.Log("OUTPUT-MARKER") }
 		t.Fatalf("subprocess output not captured by the writer:\n%s", buf.String())
 	}
 }
+
+func TestRunAllRunsEveryPackage(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	marker := filepath.Join(t.TempDir(), "marker")
+	t.Setenv("MARKER", marker)
+
+	// Both packages must run, with no -run filter.
+	if code := RunAll(ctx, dir, nil, false, nil); code != 0 {
+		t.Fatalf("RunAll code = %d want 0", code)
+	}
+
+	// The marker is overwritten by whichever TestAdd/TestOther ran last, so its
+	// presence proves at least one ran without a filter.
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("no test ran under RunAll: %v", err)
+	}
+}
+
+func TestRunAllForwardsArgsAndDryRun(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	var buf bytes.Buffer
+
+	if code := RunAll(ctx, dir, []string{"-count=1"}, true, &buf); code != 0 {
+		t.Fatalf("dry-run code = %d want 0", code)
+	}
+
+	if got := buf.String(); !strings.Contains(got, "go test -count=1 ./...") {
+		t.Fatalf("dry-run command = %q want 'go test -count=1 ./...'", got)
+	}
+}
+
+func TestRunAllReportsFailure(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	writeFile(t, dir, "pkg/beta/beta_test.go", "package beta\n\nimport \"testing\"\n\nfunc TestGreet(t *testing.T) { t.Fatal(\"boom\") }\n")
+
+	if code := RunAll(ctx, dir, nil, false, nil); code != 1 {
+		t.Fatalf("RunAll code = %d want 1 on a failing package", code)
+	}
+}

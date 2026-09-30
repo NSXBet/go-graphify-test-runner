@@ -148,6 +148,8 @@ smart-test-runner --dry-run             # print the selection, don't run
 smart-test-runner --verbose             # stream the model exchange for auditing
 smart-test-runner --json                # machine-readable result on stdout
 smart-test-runner --json --verbose      # ... including the judging
+smart-test-runner --all                 # skip selection: run go test ./...
+smart-test-runner --all -- -race        # ... forwarding flags to go test
 smart-test-runner -- -race -count=1     # everything after -- goes to go test
 ```
 
@@ -161,10 +163,25 @@ smart-test-runner -- -race -count=1     # everything after -- goes to go test
 | `--dry-run` | `false` | print selection and `go test` commands, do not run |
 | `--verbose` | `false` | print the full decisioning exchange to stderr |
 | `--json` | `false` | emit the whole result as JSON on stdout |
+| `--all` | `false` | run the whole suite (`go test ./...`) instead of selecting from the diff |
 | `--no-update-check` | `false` | skip the check for a newer release |
 
 Anything after `--` is forwarded verbatim to `go test`, so all `go test` flags
 keep working (`-- -race -count=1 -v`; `-run` is managed by the tool).
+
+### `--all` — use it as `go test`
+
+`--all` skips the diff, the code graph and the model entirely and runs
+`go test ./...` from the repository root. It needs no `OPENROUTER_API_KEY` and
+no Grove index, so one command covers both cases:
+
+```bash
+smart-test-runner --all      # every test, like `go test ./...`
+smart-test-runner            # only the tests the change can affect
+```
+
+`--dry-run`, `--json` and `--` passthrough all work with `--all`; under `--json`
+the document carries `"all": true`.
 
 ### `--verbose` — auditing the decision
 

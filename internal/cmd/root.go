@@ -36,6 +36,7 @@ type options struct {
 	verbose   bool
 	json      bool
 	noUpdate  bool
+	all       bool
 }
 
 // newRootCmd builds the root command with its flags bound to a fresh options.
@@ -57,6 +58,16 @@ func newRootCmd() *cobra.Command {
 				maybeNudge(cmd.Context())
 			}
 
+			// --all is a go test passthrough: no diff, no code graph, no model,
+			// so it needs neither an API key nor a grove index.
+			if opts.all {
+				if code := runAll(cmd.Context(), &opts, args); code != 0 {
+					os.Exit(code)
+				}
+
+				return nil
+			}
+
 			if code := runSelection(cmd.Context(), &opts, args); code != 0 {
 				os.Exit(code)
 			}
@@ -75,6 +86,7 @@ func newRootCmd() *cobra.Command {
 	f.BoolVar(&opts.verbose, "verbose", false, "print the full decisioning exchange with the decision model to stderr, for auditing")
 	f.BoolVar(&opts.json, "json", false, "emit the full result (selection, scores, and — with --verbose — the judging) as JSON on stdout")
 	f.BoolVar(&opts.noUpdate, "no-update-check", false, "skip the check for a newer release")
+	f.BoolVar(&opts.all, "all", false, "run the whole suite (go test ./...) instead of selecting tests from the diff")
 
 	rootCmd.AddCommand(newVersionCmd(), newUpgradeCmd(), newCheckUpdateCmd())
 	rootCmd.Version = version.Get()
@@ -176,6 +188,37 @@ func prepare(ctx context.Context, opts *options) (f *facts, code int) {
 		files:     changedFiles,
 		testFiles: testFiles,
 	}, 0
+}
+
+// runAll runs the whole suite from the repository root, forwarding any args
+// after -- to go test. It is the --all path: the tool behaves exactly like
+// `go test ./...` so one command covers both "run everything" and "run the
+// affected subset".
+func runAll(ctx context.Context, opts *options, extra []string) int {
+	root, err := repo.Root(ctx, opts.repo)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+
+		return 2
+	}
+
+	// Under --json stdout carries the document, so go test output goes to
+	// stderr to keep it parseable.
+	testOut := io.Writer(os.Stdout)
+	if opts.json {
+		testOut = os.Stderr
+	}
+
+	code := gotest.RunAll(ctx, root, extra, opts.dryRun, testOut)
+
+	if opts.json {
+		rep := &report{Selected: map[string][]string{}, All: true}
+		if jerr := renderJSON(os.Stdout, rep); jerr != nil {
+			fmt.Fprintln(os.Stderr, jerr)
+		}
+	}
+
+	return code
 }
 
 // runSelection performs the two decision rounds and runs the selected tests.

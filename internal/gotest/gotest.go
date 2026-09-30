@@ -170,6 +170,35 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 	return code
 }
 
+// RunAll runs the whole test suite (`go test <extra...> ./...`) from the
+// repository root, with no -run filter and no per-package grouping. It backs
+// --all, where the tool is a passthrough to go test rather than a selector.
+func RunAll(ctx context.Context, root string, extra []string, dryRun bool, out io.Writer) int {
+	if out == nil {
+		out = os.Stdout
+	}
+
+	args := append([]string{"test"}, extra...)
+	args = append(args, "./...")
+
+	if dryRun {
+		fmt.Fprintln(out, "go "+strings.Join(args, " "))
+
+		return 0
+	}
+
+	cmd := exec.CommandContext(ctx, "go", args...)
+	cmd.Dir = ModuleRoot(root, ".")
+	cmd.Stdout = out
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return 1
+	}
+
+	return 0
+}
+
 // runDir runs one package's selected tests; returns false on failure.
 func runDir(ctx context.Context, root, dir string, names, extra []string, dryRun bool, out io.Writer) bool {
 	names = append([]string(nil), names...)
