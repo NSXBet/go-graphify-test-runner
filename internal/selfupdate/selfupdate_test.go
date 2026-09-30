@@ -33,15 +33,27 @@ func TestIsNewer(t *testing.T) {
 	}
 }
 
-func TestCheckFindsNewer(t *testing.T) {
+// redirectingRelease starts a server whose /<Repo>/releases/latest redirects to
+// the given tag, mimicking GitHub's releases/latest redirect (the path the
+// version check follows - it never calls the rate-limited API).
+func redirectingRelease(t *testing.T, tag string) *httptest.Server {
+	t.Helper()
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/"+Repo+"/releases/latest" {
-			t.Errorf("unexpected path %q", r.URL.Path)
+		want := "/" + Repo + "/releases/latest"
+		if r.URL.Path != want {
+			t.Errorf("unexpected path %q, want %q", r.URL.Path, want)
 		}
 
-		_, _ = w.Write([]byte(`{"tag_name":"v2.0.0"}`))
+		http.Redirect(w, r, "/"+Repo+"/releases/tag/"+tag, http.StatusFound)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+
+	return srv
+}
+
+func TestCheckFindsNewer(t *testing.T) {
+	srv := redirectingRelease(t, "v2.0.0")
 
 	latest, outdated, err := Check(context.Background(), Options{APIBase: srv.URL, Current: "v1.0.0"})
 	if err != nil {
@@ -54,10 +66,7 @@ func TestCheckFindsNewer(t *testing.T) {
 }
 
 func TestCheckUpToDate(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"tag_name":"v1.0.0"}`))
-	}))
-	defer srv.Close()
+	srv := redirectingRelease(t, "v1.0.0")
 
 	latest, outdated, err := Check(context.Background(), Options{APIBase: srv.URL, Current: "v1.0.0"})
 	if err != nil {
@@ -70,6 +79,8 @@ func TestCheckUpToDate(t *testing.T) {
 }
 
 func TestCheckErrorStatus(t *testing.T) {
+	// No Location header: the check must error rather than silently report
+	// "up to date".
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))

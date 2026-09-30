@@ -10,13 +10,17 @@ import (
 	"github.com/NSXBet/go-smart-test-runner/internal/version"
 )
 
-// newStubReleases starts a server that answers the latest-release endpoint with
-// the given tag and returns its base URL.
+// newStubReleases starts a server whose releases/latest redirects to the given
+// tag — the redirect the version check follows, not the rate-limited API. It
+// returns the server's base URL for Options.APIBase.
 func newStubReleases(t *testing.T, tag string) string {
 	t.Helper()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `"}`))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set Location directly: http.Redirect trips gosec's open-redirect rule
+		// on a handler that echoes the request path.
+		w.Header().Set("Location", r.URL.Path+"/../tag/"+tag)
+		w.WriteHeader(http.StatusFound)
 	}))
 	t.Cleanup(srv.Close)
 

@@ -9,12 +9,15 @@ import (
 	"testing"
 )
 
-// newStubReleaseAPI answers the latest-release endpoint with the given tag.
+// newStubReleaseAPI redirects releases/latest to the given tag — the path the
+// version check follows (it does not call the rate-limited API). It returns the
+// base URL for SMART_TEST_RUNNER_UPDATE_API.
 func newStubReleaseAPI(t *testing.T, tag string) string {
 	t.Helper()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"tag_name":"` + tag + `"}`))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", r.URL.Path+"/../tag/"+tag)
+		w.WriteHeader(http.StatusFound)
 	}))
 	t.Cleanup(srv.Close)
 

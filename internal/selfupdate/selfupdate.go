@@ -4,13 +4,12 @@ package selfupdate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -38,22 +37,18 @@ const Formula = "smart-test-runner"
 // the newest non-prerelease release.
 const DefaultAPIBase = "https://api.github.com"
 
+// DefaultReleaseRoot is the web root whose /releases/latest redirects to the
+// newest non-prerelease tag - unmetered, unlike the API.
+const DefaultReleaseRoot = "https://github.com"
+
 // APIBaseEnv overrides the API root, for enterprise mirrors and tests.
 const APIBaseEnv = "SMART_TEST_RUNNER_UPDATE_API"
 
 // httpTimeout bounds the version-check request.
 const httpTimeout = 5 * time.Second
 
-// maxResponseBytes caps how much of the release payload we read.
-const maxResponseBytes = 1 << 20
-
 // versionParts is how many dotted components a version must have (x.y.z).
 const versionParts = 3
-
-// release is the subset of the GitHub release payload we need.
-type release struct {
-	TagName string `json:"tag_name"`
-}
 
 // Options controls a check.
 type Options struct {
@@ -65,61 +60,79 @@ type Options struct {
 	HTTPClient *http.Client
 }
 
-// Check queries the latest release tag and reports whether it is newer than
-// current. It returns the latest tag ("" when unknown) and whether an upgrade
-// is available. A "dev" or empty current is treated as always-outdated, so a
-// local build is told to install a release. Network failures return an error
-// the caller may ignore — the check is informational, never fatal.
+// Check reports the latest release tag and whether it is newer than current.
+// It returns the latest tag ("" when unknown) and whether an upgrade is
+// available. A "dev" or empty current is treated as always-outdated, so a local
+// build is told to install a release.
+//
+// Resolution uses the releases/latest redirect, not the GitHub API: the API is
+// rate-limited for unauthenticated callers (a 403 silently breaks the check),
+// while the redirect is unmetered and needs no token. APIBase, when set, is
+// reduced to its host part so tests and mirrors keep working.
 func Check(ctx context.Context, opts Options) (latest string, outdated bool, err error) {
-	base := opts.APIBase
-	if base == "" {
-		base = os.Getenv(APIBaseEnv)
-	}
-
-	if base == "" {
-		base = DefaultAPIBase
-	}
-
 	client := opts.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: httpTimeout}
 	}
 
-	// base is the API root: GitHub by default, overridable via opts/env for
-	// mirrors and tests. SSRF is not a threat here — the operator sets it.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/repos/"+Repo+"/releases/latest", http.NoBody) //nolint:gosec // base is operator-controlled, not remote input
+	tag, err := latestViaRedirect(ctx, client, opts.APIBase)
 	if err != nil {
 		return "", false, err
 	}
 
-	req.Header.Set("Accept", "application/vnd.github+json")
+	if tag == "" {
+		return "", false, nil
+	}
 
-	resp, err := client.Do(req) //nolint:gosec // request URL is the operator-configured API root
+	return tag, IsNewer(opts.Current, tag), nil
+}
+
+// latestViaRedirect resolves the latest release tag from the redirect target of
+// <root>/<repo>/releases/latest.
+func latestViaRedirect(ctx context.Context, client *http.Client, apiBase string) (string, error) {
+	base := apiBase
+	if base == "" {
+		base = os.Getenv(APIBaseEnv)
+	}
+
+	root := DefaultReleaseRoot
+	if base != "" {
+		root = strings.TrimSuffix(base, "/")
+		// An API root ends in /repos...; the releases root is its host part.
+		if i := strings.Index(root, "/repos"); i > 0 {
+			root = root[:i]
+		}
+	}
+
+	url := root + "/" + Repo + "/releases/latest"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody) //nolint:gosec // operator-configured root
 	if err != nil {
-		return "", false, err
+		return "", err
+	}
+
+	// Do not follow the redirect: the Location header carries the tag.
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+	resp, err := noRedirect.Do(req) //nolint:gosec // operator-configured root
+	if err != nil {
+		return "", err
 	}
 
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", false, fmt.Errorf("latest release check: HTTP %d", resp.StatusCode)
+	loc := resp.Header.Get("Location")
+	if loc == "" {
+		return "", fmt.Errorf("latest release check: no redirect from %s (HTTP %d)", url, resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return "", false, err
+	tag := path.Base(loc)
+	if tag == "" || tag == "latest" {
+		return "", fmt.Errorf("latest release check: could not parse a tag from %q", loc)
 	}
 
-	var rel release
-	if err := json.Unmarshal(body, &rel); err != nil {
-		return "", false, fmt.Errorf("latest release check: %w", err)
-	}
-
-	if rel.TagName == "" {
-		return "", false, nil
-	}
-
-	return rel.TagName, IsNewer(opts.Current, rel.TagName), nil
+	return tag, nil
 }
 
 // IsNewer reports whether candidate is a strictly higher version than current.
