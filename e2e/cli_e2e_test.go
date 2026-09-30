@@ -169,9 +169,17 @@ func TestCLIDryRunSelectsOnlyAlpha(t *testing.T) {
 		t.Fatalf("selection counts wrong:\n%s", got)
 	}
 
-	// The beta package must not appear anywhere in the plan.
-	if strings.Contains(got, "pkg/beta") {
+	// beta may still appear in the decision table as a rejected candidate — that
+	// is what the table is for — but it must not be selected, so no command may
+	// target it.
+	if strings.Contains(got, "./pkg/beta") {
 		t.Fatalf("beta selected despite no change:\n%s", got)
+	}
+
+	for line := range strings.SplitSeq(got, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "go test") && strings.Contains(line, "beta") {
+			t.Fatalf("a command targets beta despite no change:\n%s", got)
+		}
 	}
 
 	if !strings.Contains(got, "go test") || !strings.Contains(got, "pkg/alpha") {

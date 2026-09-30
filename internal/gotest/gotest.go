@@ -173,9 +173,15 @@ func ModuleRoot(root, dir string) string {
 }
 
 // Plan resolves what Run would do — which selected directories survive the
-// caller's targets, and which tests each one requests — without running
-// anything. Callers use it to describe the run before it starts.
-func Plan(selected map[string][]string, extra []string) []Result {
+// caller's targets, which of those the current build tags can build, and which
+// tests each one requests — without running any tests. Run consumes it, and
+// callers describe the run from it, so the description and the outcome cannot
+// disagree about how many packages are involved.
+//
+// The buildability probe is one `go list` per directory. It is paid here rather
+// than discovered mid-run so that a skipped package is known before the header
+// counts it.
+func Plan(ctx context.Context, root string, selected map[string][]string, extra []string) []Result {
 	// Separate the caller's go test flags from any package targets they named.
 	// Flags are forwarded to each invocation; a target narrows which selected
 	// directories run at all. Appending the target as well would run the whole
@@ -200,10 +206,29 @@ func Plan(selected map[string][]string, extra []string) []Result {
 		names := append([]string(nil), selected[dir]...)
 		sort.Strings(names)
 
-		results = append(results, Result{Dir: dir, Funcs: names})
+		res := Result{Dir: dir, Funcs: names}
+
+		if !buildable(ctx, ModuleRoot(root, dir), patternFor(root, dir)) {
+			res.Skipped = true
+			res.Output = "no buildable Go files with the current flags"
+		}
+
+		results = append(results, res)
 	}
 
 	return results
+}
+
+// patternFor renders the go test package pattern for dir.
+func patternFor(root, dir string) string {
+	m := ModuleRoot(root, dir)
+
+	rel, err := filepath.Rel(m, filepath.Join(root, dir))
+	if err != nil {
+		rel = dir
+	}
+
+	return "./" + filepath.ToSlash(rel)
 }
 
 // Run runs the selected tests grouped by package directory and returns one
@@ -212,9 +237,13 @@ func Plan(selected map[string][]string, extra []string) []Result {
 func Run(ctx context.Context, root string, selected map[string][]string, extra []string, dryRun bool) []Result {
 	flags, _ := splitArgs(extra)
 
-	results := Plan(selected, extra)
+	results := Plan(ctx, root, selected, extra)
 
 	for i := range results {
+		if results[i].Skipped {
+			continue
+		}
+
 		results[i] = runDir(ctx, root, results[i].Dir, results[i].Funcs, flags, dryRun)
 	}
 
@@ -268,23 +297,8 @@ func runDir(ctx context.Context, root, dir string, names, flags []string, dryRun
 
 	res := Result{Dir: dir, Funcs: names}
 
-	pkgDir := filepath.Join(root, dir)
 	m := ModuleRoot(root, dir)
-
-	rel, err := filepath.Rel(m, pkgDir)
-	if err != nil {
-		rel = pkgDir
-	}
-
-	pattern := "./" + filepath.ToSlash(rel)
-
-	// Skip a package the current build tags cannot build; see buildable.
-	if !buildable(ctx, m, pattern) {
-		res.Skipped = true
-		res.Output = fmt.Sprintf("skipping %s: no buildable Go files with the current flags", pattern)
-
-		return res
-	}
+	pattern := patternFor(root, dir)
 
 	args := append([]string{"test"}, flags...)
 	if len(names) > 0 {

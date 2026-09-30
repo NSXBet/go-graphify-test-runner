@@ -213,8 +213,11 @@ func runAll(ctx context.Context, opts *options, extra []string) int {
 
 		fmt.Fprint(os.Stderr, res.Output)
 	} else {
-		renderHeader(os.Stdout, &report{All: true}, nil, opts.dryRun)
-		renderOutcome(os.Stdout, []gotest.Result{res})
+		// The whole suite is one opaque go test invocation: its package count is
+		// whatever go test reports, not something this tool enumerates.
+		all := []gotest.Result{res}
+		renderHeader(os.Stdout, &report{All: true}, all, opts.dryRun)
+		renderOutcome(os.Stdout, all)
 	}
 
 	if res.Err != nil {
@@ -281,8 +284,11 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 		rep.Judging = c.Exchanges()
 	}
 
-	// Describe the run before it starts (JSON or the human header), then run it.
-	emit(rep, opts, extra)
+	// Plan before describing: the header must not promise packages the build tags
+	// cannot build, or it will disagree with the outcome below.
+	planned := gotest.Plan(ctx, f.root, selected, extra)
+
+	emit(rep, opts, planned)
 
 	if len(selected) == 0 {
 		return 0
@@ -297,7 +303,10 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 			fmt.Fprint(os.Stderr, results[i].Output)
 		}
 	} else {
+		// Result first, then the decisions that produced it: the pass/fail
+		// picture is what a user needs, the score table is why.
 		renderOutcome(os.Stdout, results)
+		renderRounds(os.Stdout, rep)
 	}
 
 	// A skipped package is not a failure; see renderOutcome.
@@ -319,7 +328,7 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 // emit renders the report: JSON to stdout under --json, otherwise the text
 // report to stdout and — under --verbose — the decisioning audit trail to
 // stderr, so the report stays parseable.
-func emit(rep *report, opts *options, extra []string) {
+func emit(rep *report, opts *options, planned []gotest.Result) {
 	if opts.json {
 		if err := renderJSON(os.Stdout, rep); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -330,7 +339,7 @@ func emit(rep *report, opts *options, extra []string) {
 
 	// The human report opens with what is about to run; the outcome follows
 	// once the tests finish.
-	renderHeader(os.Stdout, rep, gotest.Plan(rep.Selected, extra), opts.dryRun)
+	renderHeader(os.Stdout, rep, planned, opts.dryRun)
 
 	if opts.verbose {
 		renderExchangesText(os.Stderr, rep)

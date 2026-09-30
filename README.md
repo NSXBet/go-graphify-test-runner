@@ -201,8 +201,30 @@ FAIL  1 of 3 packages failed
 - Colour is used only on a terminal; a pipe, a redirect or `NO_COLOR` renders
   plain text.
 
+A **skipped** package is counted in that verdict (`PASS  3 packages · 1
+skipped`) so the closing line always adds up to the package count in the
+header.
+
+The decisions behind the selection are a table on **stdout** after the outcome —
+result first, then the reasoning:
+
+```
+round 1 (files) 20 considered · 9 selected · threshold 0.50
+╭────────────────────────────┬──────┬─────────────┬──────────╮
+│ File                       │ Test │ Probability │ Selected │
+├────────────────────────────┼──────┼─────────────┼──────────┤
+│ e2e/cli_e2e_test.go        │ —    │ 0.81        │ yes      │
+│ internal/cmd/settings_…    │ —    │ 0.39        │ no       │
+╰────────────────────────────┴──────┴─────────────┴──────────╯
+```
+
+Rejected candidates stay listed (`no`) — the point is to show what was
+considered and dropped, not only what ran. Round 2 repeats no file path: a
+blank cell means "same file as above".
+
 `--dry-run` reports the exact commands that would run instead of a pass/fail
-claim, since nothing executed.
+claim, since nothing executed. It still prints the decision tables, which are
+what selected those commands.
 
 ### `--all` — use it as `go test`
 

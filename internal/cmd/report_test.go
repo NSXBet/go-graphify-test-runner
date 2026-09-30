@@ -76,7 +76,7 @@ func TestJSONOmitsJudgingWhenAbsent(t *testing.T) {
 func TestRenderHeaderCountsSelection(t *testing.T) {
 	var buf bytes.Buffer
 
-	renderHeader(&buf, sampleReport(), gotest.Plan(sampleReport().Selected, nil), false)
+	renderHeader(&buf, sampleReport(), []gotest.Result{{Dir: "pkg", Funcs: []string{"TestA"}}}, false)
 
 	out := buf.String()
 	for _, want := range []string{
@@ -243,7 +243,7 @@ func TestRenderHeaderPluralises(t *testing.T) {
 		newRoundReport("round 2 (tests)", map[string]float64{"a_test.go::TestA": 0.9}, 0.5),
 	}
 
-	renderHeader(&buf, rep, gotest.Plan(rep.Selected, nil), false)
+	renderHeader(&buf, rep, []gotest.Result{{Dir: "pkg", Funcs: []string{"TestA"}}}, false)
 
 	out := buf.String()
 	if !strings.Contains(out, "1 test file considered, 1 selected · 1 test considered, 1 selected") {
@@ -276,5 +276,63 @@ func TestColorProfileDiscipline(t *testing.T) {
 
 	if got := colorProfile(f); got != termenv.Ascii {
 		t.Fatalf("NO_COLOR profile = %v want Ascii", got)
+	}
+}
+
+// TestRenderRoundsTable proves the decisions render as a table naming each
+// candidate, its probability and whether it was selected — the format that
+// replaced the raw "0.92 YES path" dump.
+func TestRenderRoundsTable(t *testing.T) {
+	var buf bytes.Buffer
+
+	renderRounds(&buf, sampleReport())
+
+	out := buf.String()
+	for _, want := range []string{"round 1 (files)", "round 2 (tests)", "File", "Test", "Probability", "Selected", "pkg/a_test.go"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table missing %q:\n%s", want, out)
+		}
+	}
+
+	// A rejected candidate must still be listed, marked not selected: the point
+	// of the table is to show what was considered and dropped.
+	if !strings.Contains(out, "pkg/b_test.go") {
+		t.Fatalf("rejected candidate missing from the table:\n%s", out)
+	}
+}
+
+// TestRenderOutcomeVerdictAccountsForSkipped proves the verdict explains every
+// package the header promised. The header counts packages before the run, so a
+// skipped package used to vanish and the two lines contradicted each other
+// ("running 4 packages" then "3 packages").
+func TestRenderOutcomeVerdictAccountsForSkipped(t *testing.T) {
+	var buf bytes.Buffer
+
+	renderOutcome(&buf, []gotest.Result{
+		{Dir: "skipped", Skipped: true},
+		{Dir: "ran", Funcs: []string{"TestA"}},
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "PASS") {
+		t.Fatalf("skipped package must not fail the run:\n%s", out)
+	}
+
+	if !strings.Contains(out, "1 package") || !strings.Contains(out, "1 skipped") {
+		t.Fatalf("verdict does not account for the skipped package:\n%s", out)
+	}
+}
+
+// TestDryRunResultsIgnoresSkippedFirst is the regression for the dry-run bug: a
+// skipped package sorts first in this repo, and testing only results[0] made
+// --dry-run print PASS instead of the commands.
+func TestDryRunResultsIgnoresSkippedFirst(t *testing.T) {
+	results := []gotest.Result{
+		{Dir: "skipped", Skipped: true},
+		{Dir: "planned", DryRun: true, Output: "go test ./planned"},
+	}
+
+	if !dryRunResults(results) {
+		t.Fatal("dry run not detected behind a skipped first result")
 	}
 }

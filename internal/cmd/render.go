@@ -25,6 +25,8 @@ type styles struct {
 	dim      lipgloss.Style
 	label    lipgloss.Style
 	duration lipgloss.Style
+	rule     lipgloss.Style
+	pkg      lipgloss.Style
 }
 
 func newStyles(w io.Writer) styles {
@@ -42,6 +44,8 @@ func newStyles(w io.Writer) styles {
 		dim:      r.NewStyle().Foreground(lipgloss.Color("244")),
 		label:    r.NewStyle().Foreground(lipgloss.Color("245")),
 		duration: r.NewStyle().Foreground(lipgloss.Color("245")),
+		rule:     r.NewStyle().Foreground(lipgloss.Color("238")),
+		pkg:      r.NewStyle().Foreground(lipgloss.Color("252")),
 	}
 }
 
@@ -94,10 +98,12 @@ func selection(rep *report) (filesAsked, filesSelected, testsAsked, testsSelecte
 func renderHeader(w io.Writer, rep *report, results []gotest.Result, dryRun bool) {
 	st := newStyles(w)
 
-	packages, tests := 0, 0
+	packages, tests, skipped := 0, 0, 0
 
 	for i := range results {
 		if results[i].Skipped {
+			skipped++
+
 			continue
 		}
 
@@ -115,18 +121,20 @@ func renderHeader(w io.Writer, rep *report, results []gotest.Result, dryRun bool
 
 	switch {
 	case rep.All:
+		// The whole suite is a single `go test ./...`, so this tool has no
+		// per-package or per-test count to report — only what go test prints.
 		fmt.Fprintln(w, st.label.Render("whole suite (--all)"))
 	case rep.Rounds != nil:
 		filesAsked, filesSelected, testsAsked, testsSelected := selection(rep)
 		fmt.Fprintln(w, st.label.Render(fmt.Sprintf("%s considered, %d selected · %s considered, %d selected",
 			plural(filesAsked, "test file"), filesSelected, plural(testsAsked, "test"), testsSelected)))
-		fmt.Fprintln(w, st.label.Render(planned(tests, packages, dryRun)))
+		fmt.Fprintln(w, st.label.Render(planned(tests, packages, skipped, dryRun)))
 
 		if testsSelected == 0 {
 			fmt.Fprintln(w, st.label.Render("no tests selected — nothing to run"))
 		}
 	default:
-		fmt.Fprintln(w, st.label.Render(planned(tests, packages, dryRun)))
+		fmt.Fprintln(w, st.label.Render(planned(tests, packages, skipped, dryRun)))
 	}
 
 	if rep.Cost > 0 {
@@ -138,12 +146,27 @@ func renderHeader(w io.Writer, rep *report, results []gotest.Result, dryRun bool
 
 // planned renders the run's scope, as a plan under --dry-run and as a promise
 // otherwise.
-func planned(tests, packages int, dryRun bool) string {
+//
+// The skipped count is named explicitly because it explains why the selected
+// count above
+// is larger: a selected test in a package the build tags exclude does not run,
+// and without saying so the two lines look like they disagree.
+func planned(tests, packages, skipped int, dryRun bool) string {
+	verb := "running"
 	if dryRun {
-		return fmt.Sprintf("dry run: %s in %s would run", plural(tests, "test"), plural(packages, "package"))
+		verb = "dry run:"
 	}
 
-	return fmt.Sprintf("running %s in %s", plural(tests, "test"), plural(packages, "package"))
+	line := fmt.Sprintf("%s %s in %s", verb, plural(tests, "test"), plural(packages, "package"))
+	if skipped > 0 {
+		line += " · " + plural(skipped, "package") + " skipped"
+	}
+
+	if dryRun {
+		line += " would run"
+	}
+
+	return line
 }
 
 // plural renders "1 test" / "3 tests".
@@ -244,9 +267,16 @@ func quietOutput(res *gotest.Result) bool {
 
 // dryRunResults reports whether the results describe a plan rather than an
 // execution. Nothing ran, so there is no pass/fail to report — only the
-// commands.
+// commands. Every result is checked, not just the first: a skipped package sorts
+// first in this repo (e2e/), and it is never a dry run.
 func dryRunResults(results []gotest.Result) bool {
-	return len(results) > 0 && results[0].DryRun
+	for i := range results {
+		if !results[i].Skipped && results[i].DryRun {
+			return true
+		}
+	}
+
+	return false
 }
 
 // packageLine renders one package's outcome.
@@ -276,19 +306,32 @@ func countAndDuration(res *gotest.Result) string {
 	return strings.Join(parts, "  ")
 }
 
-// verdict renders the closing line: PASS, or how many packages failed.
+// verdict renders the closing line. It accounts for every package the header
+// promised: a skipped package is named rather than silently dropped, so the
+// numbers cannot appear to disagree ("running 4 packages" then "3").
 func verdict(st *styles, results []gotest.Result, failed int) string {
-	ran := 0
+	ran, skipped := 0, 0
 
 	for i := range results {
-		if !results[i].Skipped {
-			ran++
+		if results[i].Skipped {
+			skipped++
+
+			continue
 		}
+
+		ran++
+	}
+
+	skipNote := ""
+	if skipped > 0 {
+		skipNote = " · " + plural(skipped, "skipped")
 	}
 
 	if failed == 0 {
-		return st.ok.Render("PASS") + "  " + st.label.Render(plural(ran, "package"))
+		return st.ok.Render("PASS") + "  " +
+			st.label.Render(plural(ran, "package")+skipNote)
 	}
 
-	return st.fail.Render("FAIL") + "  " + st.label.Render(fmt.Sprintf("%d of %d packages failed", failed, ran))
+	return st.fail.Render("FAIL") + "  " +
+		st.label.Render(fmt.Sprintf("%d of %d packages failed", failed, ran)+skipNote)
 }
