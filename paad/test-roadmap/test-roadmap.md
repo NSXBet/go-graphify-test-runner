@@ -67,7 +67,7 @@ Catches:  the batching loop emitting a batch that exceeds the char budget
           status/body, not merely that an error is non-nil.
 Produces: internal/decide/decide_test.go
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 3c8f4df (alter a constant)
 
 ## Phase 6: CLI rendering and report
 
