@@ -44,7 +44,7 @@ Catches:  `Evidence` returning more than the cap (a changed file with many
           location as line 0 instead of skipping the node.
 Produces: internal/graph/graph_test.go
 Branch:   test-roadmap
-Landed:
+Landed:   2026-09-30 915b9a5 (drop a state transition)
 
 ## Phase 4: Test discovery and module resolution
 
