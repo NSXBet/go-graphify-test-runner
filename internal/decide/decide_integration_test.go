@@ -9,19 +9,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 )
 
 // TestDecideMergesAcrossBatches drives a request large enough to force several
 // batches and checks every key is answered exactly once across them.
 func TestDecideMergesAcrossBatches(t *testing.T) {
-	var (
-		mu       sync.Mutex
-		seenKeys = map[string]int{}
-		batches  int
-		maxInOne int
-	)
+	// The client sends batches sequentially, so atomic counters are enough —
+	// the strict NSX config forbids sync.Mutex.
+	var batches, maxInOne, totalQuestions atomic.Int64
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -34,18 +31,12 @@ func TestDecideMergesAcrossBatches(t *testing.T) {
 			return
 		}
 
-		mu.Lock()
-		batches++
+		batches.Add(1)
+		totalQuestions.Add(int64(len(req.Questions)))
 
-		if len(req.Questions) > maxInOne {
-			maxInOne = len(req.Questions)
+		if int64(len(req.Questions)) > maxInOne.Load() {
+			maxInOne.Store(int64(len(req.Questions)))
 		}
-
-		for k := range req.Questions {
-			seenKeys[k]++
-		}
-
-		mu.Unlock()
 
 		answers := map[string]map[string]float64{}
 		for k := range req.Questions {
@@ -60,6 +51,7 @@ func TestDecideMergesAcrossBatches(t *testing.T) {
 
 	// Each instruction is large enough that only a handful fit per batch.
 	big := strings.Repeat("x", maxRequestChars/8)
+
 	qs := make([]Question, 0, 40)
 	for i := range 40 {
 		qs = append(qs, Question{Key: fmt.Sprintf("q%d", i), Instructions: big})
@@ -76,21 +68,18 @@ func TestDecideMergesAcrossBatches(t *testing.T) {
 		t.Fatalf("answers = %d want 40", len(got))
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	if batches < 2 {
-		t.Fatalf("batches = %d want >= 2 for a large request", batches)
+	if batches.Load() < 2 {
+		t.Fatalf("batches = %d want >= 2 for a large request", batches.Load())
 	}
 
-	for k, n := range seenKeys {
-		if n != 1 {
-			t.Fatalf("key %s sent %d times want 1", k, n)
-		}
+	// Every question exactly once: the total answered across requests equals
+	// the question count (a repeat would push it above).
+	if n := totalQuestions.Load(); n != int64(len(qs)) {
+		t.Fatalf("questions sent = %d want %d (a key repeated?)", n, len(qs))
 	}
 
-	if maxInOne > len(qs) {
-		t.Fatalf("impossible batch size %d", maxInOne)
+	if maxInOne.Load() > int64(len(qs)) {
+		t.Fatalf("impossible batch size %d", maxInOne.Load())
 	}
 }
 

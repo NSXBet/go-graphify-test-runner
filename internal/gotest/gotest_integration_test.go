@@ -3,8 +3,8 @@
 package gotest
 
 import (
+	"bytes"
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,35 +156,40 @@ func TestRunDryRunPrintsForwardedArgs(t *testing.T) {
 	ctx := context.Background()
 	dir := goModule(t)
 
-	// Dry-run prints the exact command to stdout; capture it and confirm the
+	// Dry-run writes the exact command to the given writer; confirm the
 	// forwarded args appear in order before -run.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	var buf bytes.Buffer
 
-	old := os.Stdout
-	os.Stdout = w
-
-	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-race", "-count=1"}, true, nil)
-
-	os.Stdout = old
-
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-race", "-count=1"}, true, &buf)
 	if code != 0 {
 		t.Fatalf("dry-run code = %d want 0", code)
 	}
 
-	got := string(out)
-	if !strings.Contains(got, "go test -race -count=1 -run") {
+	if got := buf.String(); !strings.Contains(got, "go test -race -count=1 -run") {
 		t.Fatalf("forwarded args not in printed command:\n%s", got)
+	}
+}
+
+// TestRunWriterRedirectsOutput proves subprocess output goes to the supplied
+// writer, which is what keeps --json stdout clean.
+func TestRunWriterRedirectsOutput(t *testing.T) {
+	ctx := context.Background()
+	dir := goModule(t)
+
+	writeFile(t, dir, "pkg/alpha/alpha_test.go", `package alpha
+
+import "testing"
+
+func TestAdd(t *testing.T) { t.Log("OUTPUT-MARKER") }
+`)
+
+	var buf bytes.Buffer
+
+	if code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-v"}, false, &buf); code != 0 {
+		t.Fatalf("code = %d want 0", code)
+	}
+
+	if !strings.Contains(buf.String(), "OUTPUT-MARKER") {
+		t.Fatalf("subprocess output not captured by the writer:\n%s", buf.String())
 	}
 }

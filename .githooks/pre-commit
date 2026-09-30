@@ -40,8 +40,11 @@ fi
 #    (run them with their build tags before pushing).
 go test ./... || fail "go tests failed"
 
-# 3. Lint — the strict NSX golangci-lint v2 config, full tree (the config is
-#    fast enough and --new-from-rev misses cross-file findings).
-golangci-lint run ./... || fail "golangci-lint reported issues"
+# 3. Lint — the strict NSX golangci-lint v2 config across every tier. The
+#    default run skips build-tagged files (_integration/_e2e), so lint those
+#    tags explicitly; otherwise tagged test files accumulate hidden findings.
+golangci-lint run ./... || fail "golangci-lint reported issues (unit+default)"
+golangci-lint run --build-tags=integration ./... || fail "golangci-lint reported issues (integration)"
+golangci-lint run --build-tags=e2e ./... || fail "golangci-lint reported issues (e2e)"
 
 exit 0

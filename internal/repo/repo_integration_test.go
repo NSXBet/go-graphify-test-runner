@@ -18,21 +18,19 @@ func gitRepo(t *testing.T) (dir, base string) {
 
 	dir = t.TempDir()
 
-	run := func(args ...string) string {
+	run := func(args ...string) {
 		t.Helper()
 
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(context.Background(), "git", args...)
 		cmd.Dir = dir
+
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
 
-		out, err := cmd.CombinedOutput()
-		if err != nil {
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
-
-		return string(out)
 	}
 
 	run("init", "-q", "-b", "main")
@@ -65,7 +63,7 @@ func write(t *testing.T, dir, rel, content string) {
 func gitAdd(t *testing.T, dir, rel string) {
 	t.Helper()
 
-	cmd := exec.Command("git", "add", rel)
+	cmd := exec.CommandContext(context.Background(), "git", "add", rel)
 	cmd.Dir = dir
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -87,8 +85,8 @@ func TestChangedLinesRealRepo(t *testing.T) {
 	write(t, dir, "pkg/keep.go", "package pkg\n\nfunc Keep() int { return 1 }\n\nfunc Extra() int { return 3 }\n")
 	write(t, dir, "pkg/new.go", "package pkg\n\nfunc New() int { return 4 }\n")
 
-	if err := os.Remove(filepath.Join(dir, "pkg/gone.go")); err != nil {
-		t.Fatal(err)
+	if rerr := os.Remove(filepath.Join(dir, "pkg", "gone.go")); rerr != nil {
+		t.Fatal(rerr)
 	}
 
 	gitAdd(t, dir, "pkg/new.go")

@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -31,6 +32,7 @@ func stubDecisions(t *testing.T) *httptest.Server {
 		}
 
 		answers := map[string]map[string]float64{}
+
 		for k := range req.Questions {
 			noul := 0.1
 			if strings.Contains(k, "alpha") {
@@ -55,7 +57,7 @@ func buildBinary(t *testing.T) string {
 
 	bin := filepath.Join(t.TempDir(), "gtr")
 
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/NSXBet/go-graphify-test-runner")
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "github.com/NSXBet/go-graphify-test-runner")
 	cmd.Dir = repoRoot(t)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -97,8 +99,9 @@ func fixture(t *testing.T) (dir, base string) {
 	git := func(args ...string) {
 		t.Helper()
 
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(context.Background(), "git", args...)
 		cmd.Dir = dir
+
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
@@ -147,7 +150,8 @@ func TestCLIDryRunSelectsOnlyAlpha(t *testing.T) {
 	// A behavioural touch to the alpha package.
 	write(t, dir, "pkg/alpha/alpha.go", "package alpha\n\nfunc Add(a, b int) int { return a + b + 0 }\n")
 
-	cmd := exec.Command(bin, "--repo", dir, "--base", base, "--dry-run", "--endpoint", srv.URL)
+	cmd := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base, "--dry-run", "--endpoint", srv.URL)
+
 	cmd.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
 
 	out, err := cmd.CombinedOutput()
@@ -171,10 +175,11 @@ func TestCLIDryRunSelectsOnlyAlpha(t *testing.T) {
 
 	// Proof the targeted run actually runs: the real run must not execute
 	// beta's failing test.
-	real := exec.Command(bin, "--repo", dir, "--base", base, "--endpoint", srv.URL)
-	real.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
+	ran := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base, "--endpoint", srv.URL)
 
-	if out, err := real.CombinedOutput(); err != nil {
+	ran.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
+
+	if out, err := ran.CombinedOutput(); err != nil {
 		t.Fatalf("real run failed (beta test leaked in?): %v\n%s", err, out)
 	}
 }
@@ -185,7 +190,8 @@ func TestCLINoChanges(t *testing.T) {
 
 	dir, base := fixture(t)
 
-	cmd := exec.Command(bin, "--repo", dir, "--base", base, "--endpoint", "http://127.0.0.1:0")
+	cmd := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base, "--endpoint", "http://127.0.0.1:0")
+
 	cmd.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
 
 	out, err := cmd.CombinedOutput()
@@ -204,7 +210,8 @@ func TestCLIMissingKey(t *testing.T) {
 
 	dir, base := fixture(t)
 
-	cmd := exec.Command(bin, "--repo", dir, "--base", base)
+	cmd := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base)
+
 	cmd.Env = append(os.Environ(), "OPENROUTER_API_KEY=", "AIHUB_TOKEN=")
 
 	out, err := cmd.CombinedOutput()
@@ -230,7 +237,8 @@ func TestCLIJSONIsPureAndComplete(t *testing.T) {
 	write(t, dir, "pkg/alpha/alpha.go", "package alpha\n\nfunc Add(a, b int) int { return a + b + 0 }\n")
 
 	// Threshold below every score so both rounds select, forcing the real run.
-	cmd := exec.Command(bin, "--repo", dir, "--base", base, "--json", "--endpoint", srv.URL)
+	cmd := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base, "--json", "--endpoint", srv.URL)
+
 	cmd.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
 
 	out, err := cmd.Output()
@@ -239,15 +247,15 @@ func TestCLIJSONIsPureAndComplete(t *testing.T) {
 	}
 
 	var doc struct {
-		MergeBase    string `json:"merge_base"`
-		ChangedFiles []string
+		MergeBase    string   `json:"merge_base"`
+		ChangedFiles []string `json:"changed_files"`
 		Rounds       []struct {
-			Name     string
-			Selected []string
-		}
-		Cost     float64 `json:"cost_usd"`
-		Selected map[string][]string
-		Judging  []any
+			Name     string   `json:"name"`
+			Selected []string `json:"selected"`
+		} `json:"rounds"`
+		Cost     float64             `json:"cost_usd"`
+		Selected map[string][]string `json:"selected"`
+		Judging  []any               `json:"judging"`
 	}
 
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -267,16 +275,17 @@ func TestCLIJSONIsPureAndComplete(t *testing.T) {
 	}
 
 	// With --verbose the judging block must appear.
-	verbose := exec.Command(bin, "--repo", dir, "--base", base, "--json", "--verbose", "--endpoint", srv.URL)
+	verbose := exec.CommandContext(context.Background(), bin, "--repo", dir, "--base", base, "--json", "--verbose", "--endpoint", srv.URL)
+
 	verbose.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
 
-	vout, err := verbose.Output()
-	if err != nil {
-		t.Fatalf("verbose run: %v", err)
+	vout, verr := verbose.Output()
+	if verr != nil {
+		t.Fatalf("verbose run: %v", verr)
 	}
 
-	if err := json.Unmarshal(vout, &doc); err != nil {
-		t.Fatalf("verbose stdout is not clean JSON: %v\n%s", err, vout)
+	if uerr := json.Unmarshal(vout, &doc); uerr != nil {
+		t.Fatalf("verbose stdout is not clean JSON: %v\n%s", uerr, vout)
 	}
 
 	if len(doc.Judging) == 0 {
