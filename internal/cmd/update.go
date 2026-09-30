@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/selfupdate"
-	"github.com/NSXBet/go-graphify-test-runner/internal/version"
+	"github.com/NSXBet/go-smart-test-runner/internal/selfupdate"
+	"github.com/NSXBet/go-smart-test-runner/internal/version"
 )
 
 // updateCheckTimeout bounds the pre-run version check.
@@ -19,7 +19,7 @@ const updateCheckTimeout = 3 * time.Second
 // updateHint is the printed update hint, kept in one place and tailored to how
 // the binary was installed.
 func updateHint(current, latest string) string {
-	how := "graphify-test-runner upgrade"
+	how := "smart-test-runner upgrade"
 
 	if selfupdate.DetectMethod() == selfupdate.MethodBrew {
 		how = "brew upgrade " + selfupdate.Formula
@@ -28,7 +28,7 @@ func updateHint(current, latest string) string {
 	}
 
 	return fmt.Sprintf(
-		"A new version of graphify-test-runner is available: %s (you have %s)\nUpdate with:  %s",
+		"A new version of smart-test-runner is available: %s (you have %s)\nUpdate with:  %s",
 		latest, current, how,
 	)
 }

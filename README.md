@@ -1,6 +1,6 @@
-# go-graphify-test-runner
+# go-smart-test-runner
 
-Uses AI to select the tests to run: it refreshes the local [graphify](https://pypi.org/project/graphifyy/) code graph, computes the diff from
+Uses AI to select the tests to run: it indexes the repository with [Grove](https://github.com/provasign/grove), computes the diff from
 `merge-base(HEAD, <base>)` to the working tree, then asks a decision model
 (SystemOne / OpenRouter `jev-latest`) one yes/no question per test file and,
 for each file it approves, one per test function. Only the selected tests run,
@@ -11,47 +11,47 @@ via `go test -run`.
 ### Homebrew (macOS / Linux)
 
 ```bash
-brew install nsxbet/tap/graphify-test-runner
+brew install nsxbet/tap/smart-test-runner
 ```
 
 Published to the org tap [`NSXBet/homebrew-tap`](https://github.com/NSXBet/homebrew-tap)
 (the same tap as `aihub`, `tasks`, `conduit-agent`). Homebrew-managed installs
-update with `brew upgrade graphify-test-runner` — the tool detects a Homebrew
+update with `brew upgrade smart-test-runner` — the tool detects a Homebrew
 install (Cellar/Caskroom path) and prints that command. Pre-releases are not
 published to the tap.
 
 ### Install script (macOS / Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NSXBet/go-graphify-test-runner/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/NSXBet/go-smart-test-runner/main/install.sh | sh
 ```
 
 Downloads the release binary for your OS and architecture (linux/darwin ×
 amd64/arm64), verifies its SHA-256 against the release's `checksums.txt`, and
 installs it. Honours `INSTALL_DIR` (default `/usr/local/bin`, else
 `~/.local/bin`), `VERSION` (pin a tag), and `BASE_URL` (mirror). Windows users
-should take the `.zip` from the [releases page](https://github.com/NSXBet/go-graphify-test-runner/releases).
+should take the `.zip` from the [releases page](https://github.com/NSXBet/go-smart-test-runner/releases).
 
 ### `go install`
 
 ```bash
-go install github.com/NSXBet/go-graphify-test-runner/cmd/graphify-test-runner@latest
+go install github.com/NSXBet/go-smart-test-runner/cmd/smart-test-runner@latest
 ```
 
-The main package lives under `cmd/graphify-test-runner/`, so the toolchain names
-the binary `graphify-test-runner` (a binary is named after the last element of
+The main package lives under `cmd/smart-test-runner/`, so the toolchain names
+the binary `smart-test-runner` (a binary is named after the last element of
 its import path — installing the module root would produce
-`go-graphify-test-runner`). `@latest` resolves to the highest release tag, and
-the Go toolchain embeds that tag in the binary, so `graphify-test-runner version`
+`go-smart-test-runner`). `@latest` resolves to the highest release tag, and
+the Go toolchain embeds that tag in the binary, so `smart-test-runner version`
 reports the real version — no extra step needed.
 
-Either way, `graphify` must be on `PATH` and `OPENROUTER_API_KEY` set.
+Either way, `grove` must be on `PATH` and `OPENROUTER_API_KEY` set.
 
 ## Version
 
 ```bash
-graphify-test-runner version   # v1.2.3, or "dev" for a local build
-graphify-test-runner --version # same
+smart-test-runner version   # v1.2.3, or "dev" for a local build
+smart-test-runner --version # same
 ```
 
 The version comes from, in order: the value the release build injects
@@ -64,14 +64,14 @@ On a normal run the tool checks (once a day, cached) whether a newer release
 exists and prints a one-line hint to stderr:
 
 ```
-A new version of graphify-test-runner is available: v1.2.0 (you have v1.1.0)
-Update with:  graphify-test-runner upgrade
-         or:  go install github.com/NSXBet/go-graphify-test-runner/cmd/graphify-test-runner@v1.2.0
+A new version of smart-test-runner is available: v1.2.0 (you have v1.1.0)
+Update with:  smart-test-runner upgrade
+         or:  go install github.com/NSXBet/go-smart-test-runner/cmd/smart-test-runner@v1.2.0
 ```
 
 ```bash
-graphify-test-runner check-update   # report only
-graphify-test-runner upgrade        # reinstall the latest release via go install
+smart-test-runner check-update   # report only
+smart-test-runner upgrade        # reinstall the latest release via go install
 ```
 
 - The check never blocks a run: it is best-effort, time-boxed, and any failure
@@ -80,11 +80,24 @@ graphify-test-runner upgrade        # reinstall the latest release via go instal
   Homebrew installs (a Cellar/Caskroom path) run `brew upgrade`; everything else
   reinstalls via `go install`. The install script's `INSTALL_DIR` is honoured by
   re-running the script.
-- Suppress it with `--no-update-check` or `GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK=1`.
+- Suppress it with `--no-update-check` or `SMART_TEST_RUNNER_NO_UPDATE_CHECK=1`.
 - It is skipped automatically for `--json` (so stdout stays a clean document)
   and for `version`/`help`.
-- `GRAPHIFY_TEST_RUNNER_UPDATE_API` overrides the release API root (mirrors).
+- `SMART_TEST_RUNNER_UPDATE_API` overrides the release API root (mirrors).
 - `upgrade` validates the tag before shelling out to `go install`.
+
+### Graph backend
+
+Test selection is driven by the [Grove](https://github.com/provasign/grove) code
+graph. On each run the tool runs `grove index .` (incremental — a warm run is a
+no-op), then `grove impact <changed-file>` per changed file to learn which test
+files transitively reach it. That closure is what the model is asked to judge.
+
+Grove's native Go type analyzer is off by default (`--no-native`): it panics on
+modules whose dependencies export Go 1.27 type data
+(`export data version 4 is greater than maximum supported version 2`), which is
+any repo on Go 1.27. The tree-sitter path still resolves cross-package calls.
+Set `SMART_TEST_RUNNER_GROVE_NATIVE=1` to opt back in once that is fixed upstream.
 
 ### Configuration
 
@@ -93,27 +106,27 @@ nothing is hardcoded:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL` | OpenRouter `https://openrouter.ai/api/alpha/decisions` | decisions endpoint |
-| `GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL` | `jev-latest` | decision model |
-| `GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN` | `OPENROUTER_API_KEY`, else `AIHUB_TOKEN` against the AI Hub gateway | bearer token |
+| `GOSMARTTESTRUNNER_SYSTEMONE_URL` | OpenRouter `https://openrouter.ai/api/alpha/decisions` | decisions endpoint |
+| `GOSMARTTESTRUNNER_SYSTEMONE_MODEL` | `jev-latest` | decision model |
+| `GOSMARTTESTRUNNER_SYSTEMONE_TOKEN` | `OPENROUTER_API_KEY`, else `AIHUB_TOKEN` against the AI Hub gateway | bearer token |
 
 Precedence is **flag > env > default** for URL and model. A bare base URL (no
 path) gets `/api/alpha/decisions` appended, so
-`GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL=https://ai-llm-gateway.fbr.land` works as-is.
+`GOSMARTTESTRUNNER_SYSTEMONE_URL=https://ai-llm-gateway.fbr.land` works as-is.
 
 The token has no flag — secrets should not land in shell history or process
-args. Resolution order: `GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN`, then
+args. Resolution order: `GOSMARTTESTRUNNER_SYSTEMONE_TOKEN`, then
 `OPENROUTER_API_KEY`, then `AIHUB_TOKEN` (only when the endpoint is the AI Hub
 gateway, so it is never sent to OpenRouter).
 
 ```bash
 # defaults — nothing set, uses OpenRouter + OPENROUTER_API_KEY
-graphify-test-runner --base main
+smart-test-runner --base main
 
 # point at a self-hosted gateway
-export GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL=https://ai-llm-gateway.fbr.land
-export GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL=jev-latest
-export GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=...
+export GOSMARTTESTRUNNER_SYSTEMONE_URL=https://ai-llm-gateway.fbr.land
+export GOSMARTTESTRUNNER_SYSTEMONE_MODEL=jev-latest
+export GOSMARTTESTRUNNER_SYSTEMONE_TOKEN=...
 ```
 
 ## Releases
@@ -129,13 +142,13 @@ git tag v0.1.0 && git push origin v0.1.0
 ## Usage
 
 ```bash
-graphify-test-runner                       # diff vs origin/main
-graphify-test-runner --base main           # diff vs a local branch
-graphify-test-runner --dry-run             # print the selection, don't run
-graphify-test-runner --verbose             # stream the model exchange for auditing
-graphify-test-runner --json                # machine-readable result on stdout
-graphify-test-runner --json --verbose      # ... including the judging
-graphify-test-runner -- -race -count=1     # everything after -- goes to go test
+smart-test-runner                       # diff vs origin/main
+smart-test-runner --base main           # diff vs a local branch
+smart-test-runner --dry-run             # print the selection, don't run
+smart-test-runner --verbose             # stream the model exchange for auditing
+smart-test-runner --json                # machine-readable result on stdout
+smart-test-runner --json --verbose      # ... including the judging
+smart-test-runner -- -race -count=1     # everything after -- goes to go test
 ```
 
 | Flag | Default | Meaning |
@@ -143,8 +156,8 @@ graphify-test-runner -- -race -count=1     # everything after -- goes to go test
 | `--repo` | `.` | repository path |
 | `--base` | `origin/main` | base ref for `merge-base` |
 | `--threshold` | `0.5` | `noul >= threshold` means run it |
-| `--model` | `jev-latest` | decision model (env `GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL`) |
-| `--endpoint` | OpenRouter `alpha/decisions` | decisions endpoint (env `GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL`) |
+| `--model` | `jev-latest` | decision model (env `GOSMARTTESTRUNNER_SYSTEMONE_MODEL`) |
+| `--endpoint` | OpenRouter `alpha/decisions` | decisions endpoint (env `GOSMARTTESTRUNNER_SYSTEMONE_URL`) |
 | `--dry-run` | `false` | print selection and `go test` commands, do not run |
 | `--verbose` | `false` | print the full decisioning exchange to stderr |
 | `--json` | `false` | emit the whole result as JSON on stdout |

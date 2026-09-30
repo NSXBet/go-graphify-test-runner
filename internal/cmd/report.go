@@ -6,7 +6,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/decide"
+	"github.com/NSXBet/go-smart-test-runner/internal/decide"
 )
 
 // roundReport is one decision round's outcome.

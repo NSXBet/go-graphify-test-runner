@@ -57,7 +57,7 @@ func buildBinary(t *testing.T) string {
 
 	bin := filepath.Join(t.TempDir(), "gtr")
 
-	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "./cmd/graphify-test-runner")
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "./cmd/smart-test-runner")
 	cmd.Dir = repoRoot(t)
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -216,14 +216,14 @@ func TestCLIMissingKey(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"OPENROUTER_API_KEY=",
 		"AIHUB_TOKEN=",
-		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=")
+		"GOSMARTTESTRUNNER_SYSTEMONE_TOKEN=")
 
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("want a nonzero exit without a token; out=%s", out)
 	}
 
-	for _, want := range []string{"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN", "OPENROUTER_API_KEY"} {
+	for _, want := range []string{"GOSMARTTESTRUNNER_SYSTEMONE_TOKEN", "OPENROUTER_API_KEY"} {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("error does not mention %s:\n%s", want, out)
 		}

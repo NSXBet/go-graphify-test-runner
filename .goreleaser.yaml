@@ -1,16 +1,16 @@
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 version: 2
 
-project_name: graphify-test-runner
+project_name: smart-test-runner
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: graphify-test-runner
-    main: ./cmd/graphify-test-runner
-    binary: graphify-test-runner
+  - id: smart-test-runner
+    main: ./cmd/smart-test-runner
+    binary: smart-test-runner
     env:
       - CGO_ENABLED=0
     goos:
@@ -20,10 +20,10 @@ builds:
     goarch:
       - amd64
       - arm64
-    # 386 is intentionally absent: the tool shells out to graphify and git, and
+    # 386 is intentionally absent: the tool shells out to grove and git, and
     # every platform we support has a 64-bit build.
     ldflags:
-      - -s -w -X github.com/NSXBet/go-graphify-test-runner/internal/version.Version=v{{ .Version }}
+      - -s -w -X github.com/NSXBet/go-smart-test-runner/internal/version.Version=v{{ .Version }}
 
 archives:
   - id: default
@@ -58,10 +58,10 @@ release:
   prerelease: auto
 
 homebrew_casks:
-  - name: graphify-test-runner
+  - name: smart-test-runner
     binaries:
-      - graphify-test-runner
-    homepage: "https://github.com/NSXBet/go-graphify-test-runner"
+      - smart-test-runner
+    homepage: "https://github.com/NSXBet/go-smart-test-runner"
     description: "Select and run only the Go tests a change can affect"
     repository:
       owner: NSXBet
@@ -72,7 +72,7 @@ homebrew_casks:
     commit_author:
       name: nsx-bot
       email: nsx-bot@users.noreply.github.com
-    commit_msg_template: "graphify-test-runner {{ .Version }}"
+    commit_msg_template: "smart-test-runner {{ .Version }}"
     # Pre-releases (v1.2.3-rc1) skip the cask: it would become the "latest"
     # brew install for a build the stable channel should not serve.
     skip_upload: "{{ with .Prerelease }}true{{ end }}"
@@ -84,5 +84,5 @@ homebrew_casks:
       post:
         install: |
           if OS.mac? && system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/graphify-test-runner"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/smart-test-runner"]
           end

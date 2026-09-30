@@ -8,7 +8,7 @@ import (
 
 // Version is injected at build time by the release tooling:
 //
-//	go build -ldflags "-X github.com/NSXBet/go-graphify-test-runner/internal/version.Version=v1.2.3"
+//	go build -ldflags "-X github.com/NSXBet/go-smart-test-runner/internal/version.Version=v1.2.3"
 //
 // It is empty for a plain `go build`.
 var Version string

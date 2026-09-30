@@ -17,29 +17,29 @@ import (
 )
 
 // Repo is the GitHub repository releases are published to.
-const Repo = "NSXBet/go-graphify-test-runner"
+const Repo = "NSXBet/go-smart-test-runner"
 
 // ModuleRoot is the repository's module path.
-const ModuleRoot = "github.com/NSXBet/go-graphify-test-runner"
+const ModuleRoot = "github.com/NSXBet/go-smart-test-runner"
 
 // InstallPath is the package `go install` fetches for the upgrade path. It is
 // the main package under cmd/, so the installed binary is named
-// `graphify-test-runner` (the toolchain names a binary after the import path's
+// `smart-test-runner` (the toolchain names a binary after the import path's
 // last element).
-const InstallPath = ModuleRoot + "/cmd/graphify-test-runner"
+const InstallPath = ModuleRoot + "/cmd/smart-test-runner"
 
 // Tap is the Homebrew tap that publishes the formula.
 const Tap = "NSXBet/tap"
 
-// Formula is the Homebrew formula name (`brew install NSXBet/tap/graphify-test-runner`).
-const Formula = "graphify-test-runner"
+// Formula is the Homebrew formula name (`brew install NSXBet/tap/smart-test-runner`).
+const Formula = "smart-test-runner"
 
 // DefaultAPIBase is the GitHub API root; the /releases/latest endpoint returns
 // the newest non-prerelease release.
 const DefaultAPIBase = "https://api.github.com"
 
 // APIBaseEnv overrides the API root, for enterprise mirrors and tests.
-const APIBaseEnv = "GRAPHIFY_TEST_RUNNER_UPDATE_API"
+const APIBaseEnv = "SMART_TEST_RUNNER_UPDATE_API"
 
 // httpTimeout bounds the version-check request.
 const httpTimeout = 5 * time.Second

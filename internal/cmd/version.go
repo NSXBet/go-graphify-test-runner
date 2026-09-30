@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/version"
+	"github.com/NSXBet/go-smart-test-runner/internal/version"
 )
 
 // newVersionCmd builds the `version` subcommand.

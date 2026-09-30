@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/decide"
-	"github.com/NSXBet/go-graphify-test-runner/internal/gotest"
-	"github.com/NSXBet/go-graphify-test-runner/internal/graph"
+	"github.com/NSXBet/go-smart-test-runner/internal/decide"
+	"github.com/NSXBet/go-smart-test-runner/internal/gotest"
 )
 
 func TestTruncate(t *testing.T) {
@@ -46,10 +45,9 @@ func TestOrNone(t *testing.T) {
 }
 
 func TestBuildStateIncludesSections(t *testing.T) {
-	g := &graph.Graph{}
-	state := buildState("0123456789abcdef", []string{"pkg/a.go"}, g, map[string]bool{}, "the diff body")
+	state := buildState("0123456789abcdef", []string{"pkg/a.go"}, "the diff body")
 
-	for _, want := range []string{"merge-base 0123456789ab", "Changed files:", "pkg/a.go", "Changed symbols", "the diff body"} {
+	for _, want := range []string{"merge-base 0123456789ab", "Changed files:", "pkg/a.go", "the diff body"} {
 		if !strings.Contains(state, want) {
 			t.Fatalf("state missing %q:\n%s", want, state)
 		}
@@ -57,10 +55,9 @@ func TestBuildStateIncludesSections(t *testing.T) {
 }
 
 func TestBuildStateTruncatesDiff(t *testing.T) {
-	g := &graph.Graph{}
 	huge := strings.Repeat("x", decide.MaxStateChars*2)
 
-	state := buildState("abc", []string{"pkg/a.go"}, g, map[string]bool{}, huge)
+	state := buildState("abc", []string{"pkg/a.go"}, huge)
 	if len(state) > decide.MaxStateChars {
 		t.Fatalf("state len = %d want <= %d", len(state), decide.MaxStateChars)
 	}
@@ -71,15 +68,15 @@ func TestBuildStateTruncatesDiff(t *testing.T) {
 }
 
 func TestPromptR1(t *testing.T) {
-	got := promptR1("pkg/a_test.go", "pkg", true, []string{"TestA"}, []string{"A()"}, nil)
+	got := promptR1("pkg/a_test.go", "pkg", true, []string{"TestA"}, []string{"A()"})
 
-	for _, want := range []string{"pkg/a_test.go", "same directory as a changed file: yes", "TestA", "A()", "indirectly: none"} {
+	for _, want := range []string{"pkg/a_test.go", "same directory as a changed file: yes", "TestA", "A()"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("promptR1 missing %q:\n%s", want, got)
 		}
 	}
 
-	no := promptR1("pkg/b_test.go", "pkg", false, nil, nil, nil)
+	no := promptR1("pkg/b_test.go", "pkg", false, nil, nil)
 	if !strings.Contains(no, "same directory as a changed file: no") {
 		t.Fatalf("promptR1 sameDir=false wrong:\n%s", no)
 	}
@@ -91,7 +88,7 @@ func TestPromptR1CapsNames(t *testing.T) {
 		names = append(names, string(rune('A'+i%26)))
 	}
 
-	got := promptR1("pkg/a_test.go", "pkg", false, names, nil, nil)
+	got := promptR1("pkg/a_test.go", "pkg", false, names, nil)
 	if !strings.Contains(got, "…") {
 		t.Fatalf("promptR1 did not cap names:\n%s", got)
 	}
@@ -99,9 +96,9 @@ func TestPromptR1CapsNames(t *testing.T) {
 
 func TestPromptR2(t *testing.T) {
 	fn := gotest.Func{Name: "TestAdd", Src: "func TestAdd(t *testing.T) {}"}
-	got := promptR2("pkg/a_test.go", fn, []string{"Add()"}, []string{"X() via Y()"})
+	got := promptR2("pkg/a_test.go", fn, []string{"Add()"})
 
-	for _, want := range []string{"TestAdd", "pkg/a_test.go", "Add()", "X() via Y()", fn.Src} {
+	for _, want := range []string{"TestAdd", "pkg/a_test.go", "Add()", fn.Src} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("promptR2 missing %q:\n%s", want, got)
 		}

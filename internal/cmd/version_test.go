@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/version"
+	"github.com/NSXBet/go-smart-test-runner/internal/version"
 )
 
 func TestVersionCommandPrintsInjectedVersion(t *testing.T) {

@@ -68,7 +68,7 @@ func TestCLICheckUpdateAndUpgradeRegistered(t *testing.T) {
 	bin := buildBinary(t)
 
 	srv := newStubReleaseAPI(t, "v9.9.9")
-	env := []string{"GRAPHIFY_TEST_RUNNER_UPDATE_API=" + srv}
+	env := []string{"SMART_TEST_RUNNER_UPDATE_API=" + srv}
 
 	stdout, _, code := runCLI(t, bin, env, "check-update")
 	if code != 0 {

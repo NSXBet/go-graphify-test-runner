@@ -361,7 +361,7 @@ func TestCLIJSONWithDryRun(t *testing.T) {
 }
 
 // TestCLIUsesSystemOneEnvVars proves the run honours the
-// GOGRAPHIFYTESTRUNNER_SYSTEMONE_* environment variables with no flags: the
+// GOSMARTTESTRUNNER_SYSTEMONE_* environment variables with no flags: the
 // stub server is reached via the env URL, its model recorded, and the env
 // token accepted.
 func TestCLIUsesSystemOneEnvVars(t *testing.T) {
@@ -398,10 +398,10 @@ func TestCLIUsesSystemOneEnvVars(t *testing.T) {
 	write(t, dir, "pkg/alpha/alpha.go", "package alpha\n\nfunc Add(a, b int) int { return a + b + 0 }\n")
 
 	_, _, code := runCLI(t, bin, []string{
-		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL=" + srv.URL,
-		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL=env-only-model",
-		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=env-token",
-		"GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK=1",
+		"GOSMARTTESTRUNNER_SYSTEMONE_URL=" + srv.URL,
+		"GOSMARTTESTRUNNER_SYSTEMONE_MODEL=env-only-model",
+		"GOSMARTTESTRUNNER_SYSTEMONE_TOKEN=env-token",
+		"SMART_TEST_RUNNER_NO_UPDATE_CHECK=1",
 	}, "--repo", dir, "--base", base)
 
 	if code != 0 {
@@ -414,7 +414,7 @@ func TestCLIUsesSystemOneEnvVars(t *testing.T) {
 }
 
 // TestCLIEnvTokenRequiredWithoutFlags proves the documented token resolution:
-// with only GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN set (no OPENROUTER_API_KEY),
+// with only GOSMARTTESTRUNNER_SYSTEMONE_TOKEN set (no OPENROUTER_API_KEY),
 // the run proceeds; with neither, it exits 2 naming the variables.
 func TestCLIEnvTokenRequiredWithoutFlags(t *testing.T) {
 	bin := buildBinary(t)
@@ -423,7 +423,7 @@ func TestCLIEnvTokenRequiredWithoutFlags(t *testing.T) {
 
 	_, stderr, code := runCLI(t, bin, []string{
 		"OPENROUTER_API_KEY=",
-		"GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN=",
+		"GOSMARTTESTRUNNER_SYSTEMONE_TOKEN=",
 		"AIHUB_TOKEN=",
 	}, "--repo", dir, "--base", base)
 
@@ -431,7 +431,7 @@ func TestCLIEnvTokenRequiredWithoutFlags(t *testing.T) {
 		t.Fatalf("exit = %d want 2 without a token", code)
 	}
 
-	if !strings.Contains(stderr, "GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN") {
+	if !strings.Contains(stderr, "GOSMARTTESTRUNNER_SYSTEMONE_TOKEN") {
 		t.Fatalf("error does not name the env var:\n%s", stderr)
 	}
 }

@@ -1,4 +1,4 @@
-module github.com/NSXBet/go-graphify-test-runner
+module github.com/NSXBet/go-smart-test-runner
 
 go 1.27.1
 

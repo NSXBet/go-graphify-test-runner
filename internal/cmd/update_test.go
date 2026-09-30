@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/version"
+	"github.com/NSXBet/go-smart-test-runner/internal/version"
 )
 
 // newStubReleases starts a server that answers the latest-release endpoint with
@@ -26,7 +26,7 @@ func newStubReleases(t *testing.T, tag string) string {
 func TestUpdateHintMentionsBothPaths(t *testing.T) {
 	got := updateHint("v1.0.0", "v2.0.0")
 
-	for _, want := range []string{"v2.0.0", "v1.0.0", "graphify-test-runner upgrade", "go install"} {
+	for _, want := range []string{"v2.0.0", "v1.0.0", "smart-test-runner upgrade", "go install"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hint missing %q:\n%s", want, got)
 		}
@@ -40,7 +40,7 @@ func TestCheckUpdateUpToDate(t *testing.T) {
 
 	// A stub HTTP server is installed via the env override the package reads.
 	srv := newStubReleases(t, "v1.0.0")
-	t.Setenv("GRAPHIFY_TEST_RUNNER_UPDATE_API", srv)
+	t.Setenv("SMART_TEST_RUNNER_UPDATE_API", srv)
 
 	cmd := newCheckUpdateCmd()
 

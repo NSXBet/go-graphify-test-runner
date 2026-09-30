@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/decide"
+	"github.com/NSXBet/go-smart-test-runner/internal/decide"
 )
 
 func sampleReport() *report {

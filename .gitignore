@@ -31,9 +31,11 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# graphify-test-runner artifacts
-graphify-out/
-/graphify-test-runner
+# smart-test-runner artifacts
+/smart-test-runner
+
+# grove index
+.grove/
 
 # goreleaser output
 dist/

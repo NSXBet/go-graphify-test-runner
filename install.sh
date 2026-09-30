@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
-# Install graphify-test-runner from GitHub releases.
+# Install smart-test-runner from GitHub releases.
 #
-#   curl -fsSL https://raw.githubusercontent.com/NSXBet/go-graphify-test-runner/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/NSXBet/go-smart-test-runner/main/install.sh | sh
 #
 # Honours:
 #   INSTALL_DIR   where to place the binary   (default: /usr/local/bin, else ~/.local/bin)
@@ -13,8 +13,8 @@
 # shell script cannot handle.
 set -eu
 
-REPO="NSXBet/go-graphify-test-runner"
-BIN="graphify-test-runner"
+REPO="NSXBet/go-smart-test-runner"
+BIN="smart-test-runner"
 
 info() { printf '%s\n' "$*" >&2; }
 fail() { printf 'install: %s\n' "$*" >&2; exit 1; }

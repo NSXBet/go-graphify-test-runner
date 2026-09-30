@@ -10,9 +10,9 @@ import (
 // model seed the matching flags' defaults (so a flag still wins); the token has
 // no flag — secrets do not belong in shell history or process args.
 const (
-	envSystemOneURL   = "GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL"
-	envSystemOneModel = "GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL"
-	envSystemOneToken = "GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN" //nolint:gosec // the env-var *name*, not a credential value
+	envSystemOneURL   = "GOSMARTTESTRUNNER_SYSTEMONE_URL"
+	envSystemOneModel = "GOSMARTTESTRUNNER_SYSTEMONE_MODEL"
+	envSystemOneToken = "GOSMARTTESTRUNNER_SYSTEMONE_TOKEN"
 
 	// Fallback token sources, used when the explicit token env var is unset.
 	envOpenRouterKey = "OPENROUTER_API_KEY"
@@ -28,7 +28,7 @@ const (
 	decisionsPath = "/api/alpha/decisions"
 )
 
-// endpointFromEnv returns the decisions endpoint: GOGRAPHIFYTESTRUNNER_SYSTEMONE_URL
+// endpointFromEnv returns the decisions endpoint: GOSMARTTESTRUNNER_SYSTEMONE_URL
 // when set, else the OpenRouter default. A bare base URL (scheme and host, no
 // path) gets the standard decisions path appended, so both
 // `https://ai-llm-gateway.fbr.land` and a full endpoint URL work.
@@ -63,7 +63,7 @@ func schemePrefix(raw string) string {
 	return raw[:i+len("://")]
 }
 
-// modelFromEnv returns the decision model: GOGRAPHIFYTESTRUNNER_SYSTEMONE_MODEL
+// modelFromEnv returns the decision model: GOSMARTTESTRUNNER_SYSTEMONE_MODEL
 // when set, else the default.
 func modelFromEnv() string {
 	if m := strings.TrimSpace(os.Getenv(envSystemOneModel)); m != "" {
@@ -75,7 +75,7 @@ func modelFromEnv() string {
 
 // resolveToken resolves the bearer token, in order:
 //
-//  1. GOGRAPHIFYTESTRUNNER_SYSTEMONE_TOKEN — the explicit override;
+//  1. GOSMARTTESTRUNNER_SYSTEMONE_TOKEN — the explicit override;
 //  2. OPENROUTER_API_KEY — the default source;
 //  3. AIHUB_TOKEN — so a pre-existing AI Hub set-up keeps working, but only
 //     when the endpoint is the AI Hub gateway (it would otherwise be sent to

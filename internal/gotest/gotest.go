@@ -17,7 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/repo"
+	"github.com/NSXBet/go-smart-test-runner/internal/repo"
 )
 
 // snippetLimit caps a test function's source snippet, in bytes.

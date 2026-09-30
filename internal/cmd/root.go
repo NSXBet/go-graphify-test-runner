@@ -1,4 +1,4 @@
-// Package cmd wires the graphify-test-runner Cobra command: it refreshes the
+// Package cmd wires the smart-test-runner Cobra command: it refreshes the
 // code graph, selects the tests a change can affect, and runs them.
 package cmd
 
@@ -8,16 +8,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"github.com/NSXBet/go-graphify-test-runner/internal/decide"
-	"github.com/NSXBet/go-graphify-test-runner/internal/gotest"
-	"github.com/NSXBet/go-graphify-test-runner/internal/graph"
-	"github.com/NSXBet/go-graphify-test-runner/internal/repo"
-	"github.com/NSXBet/go-graphify-test-runner/internal/version"
+	"github.com/NSXBet/go-smart-test-runner/internal/decide"
+	"github.com/NSXBet/go-smart-test-runner/internal/gotest"
+	"github.com/NSXBet/go-smart-test-runner/internal/impact"
+	"github.com/NSXBet/go-smart-test-runner/internal/repo"
+	"github.com/NSXBet/go-smart-test-runner/internal/version"
 )
 
 // Tunables that would otherwise read as bare magic numbers at their call sites.
@@ -45,17 +44,17 @@ func newRootCmd() *cobra.Command {
 	var opts options
 
 	rootCmd := &cobra.Command{
-		Use:   "graphify-test-runner [flags] -- [go test flags]",
+		Use:   "smart-test-runner [flags] -- [go test flags]",
 		Short: "Select and run only the Go tests a change can affect",
-		Long: "graphify-test-runner refreshes the local graphify code graph, computes the\n" +
+		Long: "smart-test-runner indexes the repository with Grove, computes the\n" +
 			"diff from merge-base(HEAD, base) to the working tree, then asks SystemOne (one\n" +
 			"yes/no question per test file, then one per test function) which tests to run.\n\n" +
 			"Any arguments after -- are forwarded to go test, e.g.:\n\n" +
-			"  graphify-test-runner -base origin/main -- -race -count=1",
+			"  smart-test-runner -base origin/main -- -race -count=1",
 		Args:         cobra.ArbitraryArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if !opts.noUpdate && !opts.json && os.Getenv("GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK") == "" {
+			if !opts.noUpdate && !opts.json && os.Getenv("SMART_TEST_RUNNER_NO_UPDATE_CHECK") == "" {
 				maybeNudge(cmd.Context())
 			}
 
@@ -99,13 +98,12 @@ func apiKey(endpoint string) (string, error) {
 
 // facts is everything resolved before the decision rounds.
 type facts struct {
-	root       string
-	g          *graph.Graph
-	mb         string
-	diff       string
-	files      []string
-	changedIDs map[string]bool
-	testFiles  []string
+	root      string
+	g         *impact.Graph
+	mb        string
+	diff      string
+	files     []string
+	testFiles []string
 }
 
 // prepare resolves the repo, the code graph, and the changed set. It returns a
@@ -118,13 +116,13 @@ func prepare(ctx context.Context, opts *options) (f *facts, code int) {
 		return nil, 2
 	}
 
-	if uerr := graph.Update(ctx, root); uerr != nil {
+	if uerr := impact.Update(ctx, root); uerr != nil {
 		fmt.Fprintln(os.Stderr, uerr)
 
 		return nil, 2
 	}
 
-	g, err := graph.Load(root)
+	g, err := impact.Load(ctx, root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 
@@ -151,6 +149,13 @@ func prepare(ctx context.Context, opts *options) (f *facts, code int) {
 		return nil, 2
 	}
 
+	changedFiles := repo.ChangedFiles(changed)
+	if ierr := g.IndexChanged(ctx, changedFiles); ierr != nil {
+		fmt.Fprintln(os.Stderr, ierr)
+
+		return nil, 2
+	}
+
 	testFiles, err := gotest.ListFiles(ctx, root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -165,13 +170,12 @@ func prepare(ctx context.Context, opts *options) (f *facts, code int) {
 	}
 
 	return &facts{
-		root:       root,
-		g:          g,
-		mb:         mb,
-		diff:       diff,
-		files:      repo.ChangedFiles(changed),
-		changedIDs: g.ChangedSymbols(changed),
-		testFiles:  testFiles,
+		root:      root,
+		g:         g,
+		mb:        mb,
+		diff:      diff,
+		files:     changedFiles,
+		testFiles: testFiles,
 	}, 0
 }
 
@@ -196,11 +200,11 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 		return code
 	}
 
-	state := buildState(f.mb, f.files, f.g, f.changedIDs, f.diff)
+	state := buildState(f.mb, f.files, f.diff)
 	fmt.Fprintf(os.Stderr, "state: %d chars, changed files: %d, test files: %d\n", len(state), len(f.files), len(f.testFiles))
 
 	c := decide.NewClient(opts.endpoint, key, opts.model)
-	parsedFiles, r1qs := round1(f.root, f.g, f.changedIDs, f.testFiles, f.files)
+	parsedFiles, r1qs := round1(f.root, f.g, f.testFiles, f.files)
 
 	r1, err := c.Decide(ctx, state, r1qs)
 	if err != nil {
@@ -209,7 +213,7 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 		return 2
 	}
 
-	r2, r2items, err := round2(ctx, c, state, f.g, f.changedIDs, parsedFiles, r1, opts.threshold)
+	r2, r2items, err := round2(ctx, c, state, f.g, parsedFiles, r1, opts.threshold)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 
@@ -288,7 +292,7 @@ type parsedFile struct {
 }
 
 // round1 builds the per-test-file questions.
-func round1(root string, g *graph.Graph, changedIDs map[string]bool, testFiles, files []string) ([]parsedFile, []decide.Question) {
+func round1(root string, g *impact.Graph, testFiles, files []string) ([]parsedFile, []decide.Question) {
 	changedDirs := map[string]bool{}
 	for _, f := range files {
 		changedDirs[filepath.Dir(f)] = true
@@ -315,11 +319,11 @@ func round1(root string, g *graph.Graph, changedIDs map[string]bool, testFiles, 
 		}
 
 		dir := filepath.Dir(path)
-		direct, indirect := g.Evidence(g.FileCallers(path), changedIDs)
+		reaches := g.Reaches(path)
 
 		q = append(q, decide.Question{
 			Key:          path,
-			Instructions: truncate(promptR1(path, dir, changedDirs[dir], names, direct, indirect), decide.MaxInstrChars),
+			Instructions: truncate(promptR1(path, dir, changedDirs[dir], names, reaches), decide.MaxInstrChars),
 		})
 	}
 
@@ -333,7 +337,7 @@ type r2item struct {
 }
 
 // round2 asks about every test function in each selected file.
-func round2(ctx context.Context, c *decide.Client, state string, g *graph.Graph, changedIDs map[string]bool, parsedFiles []parsedFile, r1 map[string]float64, threshold float64) (map[string]float64, []r2item, error) {
+func round2(ctx context.Context, c *decide.Client, state string, g *impact.Graph, parsedFiles []parsedFile, r1 map[string]float64, threshold float64) (map[string]float64, []r2item, error) {
 	var (
 		qs    []decide.Question
 		items []r2item
@@ -344,12 +348,12 @@ func round2(ctx context.Context, c *decide.Client, state string, g *graph.Graph,
 			continue
 		}
 
-		for _, fn := range pf.funcs {
-			direct, indirect := g.Evidence(testCallers(g, pf.path, fn.Name), changedIDs)
+		reaches := g.Reaches(pf.path)
 
+		for _, fn := range pf.funcs {
 			qs = append(qs, decide.Question{
 				Key:          pf.path + "::" + fn.Name,
-				Instructions: truncate(promptR2(pf.path, fn, direct, indirect), decide.MaxInstrChars),
+				Instructions: truncate(promptR2(pf.path, fn, reaches), decide.MaxInstrChars),
 			})
 			items = append(items, r2item{path: pf.path, fn: fn})
 		}
@@ -365,15 +369,6 @@ func round2(ctx context.Context, c *decide.Client, state string, g *graph.Graph,
 	}
 
 	return r2, items, nil
-}
-
-// testCallers returns the graph node for a test function, if any.
-func testCallers(g *graph.Graph, path, name string) []string {
-	if id := g.NodeIDFor(path, name); id != "" {
-		return []string{id}
-	}
-
-	return nil
 }
 
 // selectedTests groups the accepted tests by package directory.
@@ -401,7 +396,7 @@ func short(sha string) string {
 
 // buildState renders the state shared by both rounds, capped at
 // decide.MaxStateChars characters.
-func buildState(mb string, files []string, g *graph.Graph, changedIDs map[string]bool, diff string) string {
+func buildState(mb string, files []string, diff string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Change under review: diff from merge-base %s to working tree.\n", short(mb))
@@ -411,8 +406,6 @@ func buildState(mb string, files []string, g *graph.Graph, changedIDs map[string
 		b.WriteString(f + "\n")
 	}
 
-	b.WriteString("Changed symbols (from code graph):\n")
-	writeSymbols(&b, g.Labels(changedIDs))
 	b.WriteString("Diff:\n")
 
 	head := b.String()
@@ -431,24 +424,8 @@ func buildState(mb string, files []string, g *graph.Graph, changedIDs map[string
 	return b.String()
 }
 
-// writeSymbols writes the per-file changed-symbol lines, sorted for stability.
-func writeSymbols(b *strings.Builder, byFile map[string][]string) {
-	ff := make([]string, 0, len(byFile))
-	for f := range byFile {
-		ff = append(ff, f)
-	}
-
-	sort.Strings(ff)
-
-	for _, f := range ff {
-		labels := byFile[f]
-		sort.Strings(labels)
-		fmt.Fprintf(b, "%s: %s\n", f, strings.Join(labels, ", "))
-	}
-}
-
 // promptR1 renders the per-test-file question.
-func promptR1(path, dir string, sameDir bool, names, direct, indirect []string) string {
+func promptR1(path, dir string, sameDir bool, names, reaches []string) string {
 	same := "no"
 	if sameDir {
 		same = "yes"
@@ -463,19 +440,17 @@ func promptR1(path, dir string, sameDir bool, names, direct, indirect []string) 
 	fmt.Fprintf(&b, "Should Go test file `%s` be run to validate this change? Answer yes if any test in it likely exercises changed code or behavior.\n", path)
 	fmt.Fprintf(&b, "Package dir: %s (same directory as a changed file: %s).\n", dir, same)
 	fmt.Fprintf(&b, "Tests: %s.\n", strings.Join(names, ", "))
-	fmt.Fprintf(&b, "Calls changed symbols directly: %s.\n", orNone(direct))
-	fmt.Fprintf(&b, "Calls changed symbols indirectly: %s.\n", orNone(indirect))
+	fmt.Fprintf(&b, "Calls into these changed files: %s.\n", orNone(reaches))
 
 	return b.String()
 }
 
 // promptR2 renders the per-test-function question.
-func promptR2(path string, fn gotest.Func, direct, indirect []string) string {
+func promptR2(path string, fn gotest.Func, reaches []string) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "Should test `%s` in `%s` be run to validate this change? Answer yes if it likely exercises changed code or behavior.\n", fn.Name, path)
-	fmt.Fprintf(&b, "Calls changed symbols directly: %s.\n", orNone(direct))
-	fmt.Fprintf(&b, "Calls changed symbols indirectly: %s.\n", orNone(indirect))
+	fmt.Fprintf(&b, "Calls into these changed files: %s.\n", orNone(reaches))
 	b.WriteString("Source:\n")
 	b.WriteString(fn.Src)
 

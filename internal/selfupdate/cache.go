@@ -23,14 +23,14 @@ type cache struct {
 	Latest    string    `json:"latest"`
 }
 
-// cachePath returns ~/.cache/graphify-test-runner/update-check.json.
+// cachePath returns ~/.cache/smart-test-runner/update-check.json.
 func cachePath() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
 
-	return filepath.Join(base, "graphify-test-runner", "update-check.json"), nil
+	return filepath.Join(base, "smart-test-runner", "update-check.json"), nil
 }
 
 // ReadCache returns a cached check if it is still fresh. The bool reports

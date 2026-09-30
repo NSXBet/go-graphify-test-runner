@@ -8,12 +8,12 @@ import (
 
 func TestUnderCellar(t *testing.T) {
 	tests := map[string]bool{
-		"/opt/homebrew/Cellar/graphify-test-runner/1.2.3/bin/graphify-test-runner": true,
-		"/opt/homebrew/Caskroom/graphify-test-runner/1.2.3/graphify-test-runner":   true,
-		"/usr/local/Cellar/graphify-test-runner/1.2.3/bin/graphify-test-runner":    true,
-		"/home/u/go/bin/graphify-test-runner":                                      false,
-		"/usr/local/bin/graphify-test-runner":                                      false,
-		"/tmp/Cellarish/graphify-test-runner":                                      false,
+		"/opt/homebrew/Cellar/smart-test-runner/1.2.3/bin/smart-test-runner": true,
+		"/opt/homebrew/Caskroom/smart-test-runner/1.2.3/smart-test-runner":   true,
+		"/usr/local/Cellar/smart-test-runner/1.2.3/bin/smart-test-runner":    true,
+		"/home/u/go/bin/smart-test-runner":                                   false,
+		"/usr/local/bin/smart-test-runner":                                   false,
+		"/tmp/Cellarish/smart-test-runner":                                   false,
 	}
 
 	for path, want := range tests {
