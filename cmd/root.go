@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,6 +36,7 @@ type options struct {
 	endpoint  string
 	dryRun    bool
 	verbose   bool
+	json      bool
 }
 
 // newRootCmd builds the root command with its flags bound to a fresh options.
@@ -68,6 +70,7 @@ func newRootCmd() *cobra.Command {
 	f.StringVar(&opts.endpoint, "endpoint", "https://openrouter.ai/api/alpha/decisions", "decisions endpoint")
 	f.BoolVar(&opts.dryRun, "dry-run", false, "print selection and go test commands, do not run")
 	f.BoolVar(&opts.verbose, "verbose", false, "print the full decisioning exchange with the decision model to stderr, for auditing")
+	f.BoolVar(&opts.json, "json", false, "emit the full result (selection, scores, and — with --verbose — the judging) as JSON on stdout")
 
 	return rootCmd
 }
@@ -183,6 +186,12 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 
 	f, code := prepare(ctx, opts)
 	if f == nil {
+		if opts.json {
+			if jerr := renderJSON(os.Stdout, &report{Selected: map[string][]string{}}); jerr != nil {
+				fmt.Fprintln(os.Stderr, jerr)
+			}
+		}
+
 		return code
 	}
 
@@ -190,10 +199,6 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 	fmt.Fprintf(os.Stderr, "state: %d chars, changed files: %d, test files: %d\n", len(state), len(f.files), len(f.testFiles))
 
 	c := decide.NewClient(opts.endpoint, key, opts.model)
-	if opts.verbose {
-		c.SetVerbose(os.Stderr)
-	}
-
 	parsedFiles, r1qs := round1(f.root, f.g, f.changedIDs, f.testFiles, f.files)
 
 	r1, err := c.Decide(ctx, state, r1qs)
@@ -203,8 +208,6 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 		return 2
 	}
 
-	reportRound("round 1 (files)", r1, opts.threshold)
-
 	r2, r2items, err := round2(ctx, c, state, f.g, f.changedIDs, parsedFiles, r1, opts.threshold)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -212,16 +215,54 @@ func runSelection(ctx context.Context, opts *options, extra []string) int {
 		return 2
 	}
 
-	fmt.Fprintf(os.Stdout, "cost: $%.6f\n", c.Cost())
-
 	selected := selectedTests(r2, r2items, opts.threshold)
-	if len(selected) == 0 {
-		fmt.Fprintln(os.Stdout, "no tests selected")
 
+	rep := &report{
+		MergeBase:    short(f.mb),
+		ChangedFiles: f.files,
+		StateChars:   len(state),
+		Rounds: []roundReport{
+			newRoundReport("round 1 (files)", r1, opts.threshold),
+			newRoundReport("round 2 (tests)", r2, opts.threshold),
+		},
+		Cost:     c.Cost(),
+		Selected: selected,
+	}
+	if opts.verbose {
+		rep.Judging = c.Exchanges()
+	}
+
+	emit(rep, opts)
+
+	if len(selected) == 0 {
 		return 0
 	}
 
-	return gotest.Run(ctx, f.root, selected, extra, opts.dryRun)
+	testOut := io.Writer(os.Stdout)
+	if opts.json {
+		testOut = os.Stderr
+	}
+
+	return gotest.Run(ctx, f.root, selected, extra, opts.dryRun, testOut)
+}
+
+// emit renders the report: JSON to stdout under --json, otherwise the text
+// report to stdout and — under --verbose — the decisioning audit trail to
+// stderr, so the report stays parseable.
+func emit(rep *report, opts *options) {
+	if opts.json {
+		if err := renderJSON(os.Stdout, rep); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
+		return
+	}
+
+	renderText(os.Stdout, rep)
+
+	if opts.verbose {
+		renderExchangesText(os.Stderr, rep)
+	}
 }
 
 // changedSet returns the changed-line map and the merge-base sha.
@@ -314,8 +355,6 @@ func round2(ctx context.Context, c *decide.Client, state string, g *graph.Graph,
 	}
 
 	if len(qs) == 0 {
-		fmt.Fprintln(os.Stdout, "round 2 (tests): 0 asked, 0 selected")
-
 		return nil, items, nil
 	}
 
@@ -323,8 +362,6 @@ func round2(ctx context.Context, c *decide.Client, state string, g *graph.Graph,
 	if err != nil {
 		return nil, nil, err
 	}
-
-	reportRound("round 2 (tests)", r2, threshold)
 
 	return r2, items, nil
 }
@@ -359,35 +396,6 @@ func short(sha string) string {
 	}
 
 	return sha
-}
-
-// reportRound prints one round's verdict lines, sorted by key.
-func reportRound(label string, scores map[string]float64, threshold float64) {
-	keys := make([]string, 0, len(scores))
-	for k := range scores {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	sel := 0
-
-	for _, k := range keys {
-		if scores[k] >= threshold {
-			sel++
-		}
-	}
-
-	fmt.Fprintf(os.Stdout, "%s: %d asked, %d selected\n", label, len(keys), sel)
-
-	for _, k := range keys {
-		mark := "no "
-		if scores[k] >= threshold {
-			mark = "YES"
-		}
-
-		fmt.Fprintf(os.Stdout, "  %.2f %s %s\n", scores[k], mark, k)
-	}
 }
 
 // buildState renders the state shared by both rounds, capped at

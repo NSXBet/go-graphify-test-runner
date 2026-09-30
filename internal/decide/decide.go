@@ -62,14 +62,35 @@ type Question struct {
 	Instructions string
 }
 
+// Exchange records one HTTP round trip with the decision model, so a selection
+// can be audited after the fact.
+type Exchange struct {
+	Endpoint     string             `json:"endpoint"`
+	Model        string             `json:"model_requested"`
+	StateChars   int                `json:"state_chars"`
+	QuestionKeys []string           `json:"question_keys"`
+	Instructions map[string]string  `json:"instructions"`
+	Status       int                `json:"status"`
+	RawResponse  string             `json:"raw_response"`
+	AnswerModel  string             `json:"answer_model,omitempty"`
+	Provider     string             `json:"provider,omitempty"`
+	ID           string             `json:"id,omitempty"`
+	InputTokens  int                `json:"input_tokens,omitempty"`
+	OutputTokens int                `json:"output_tokens,omitempty"`
+	Cost         float64            `json:"cost"`
+	Answers      map[string]float64 `json:"answers,omitempty"`
+	Missing      []string           `json:"missing_answers,omitempty"`
+}
+
 // Client is a SystemOne decisions client with request batching.
 type Client struct {
-	http     *http.Client
-	endpoint string
-	key      string
-	model    string
-	cost     float64
-	verbose  io.Writer
+	http      *http.Client
+	endpoint  string
+	key       string
+	model     string
+	cost      float64
+	state     string
+	exchanges []Exchange
 }
 
 // NewClient builds a client for the given endpoint, key and model.
@@ -82,34 +103,20 @@ func NewClient(endpoint, key, model string) *Client {
 	}
 }
 
-// SetVerbose turns on the decisioning audit trail, written to w. Nil disables
-// it (the default).
-func (c *Client) SetVerbose(w io.Writer) { c.verbose = w }
-
-// logf writes one audit line when verbose output is enabled.
-func (c *Client) logf(format string, args ...any) {
-	if c.verbose == nil {
-		return
-	}
-
-	fmt.Fprintf(c.verbose, "[decide] "+format+"\n", args...)
-}
-
 // Cost returns the accumulated usage cost in dollars.
 func (c *Client) Cost() float64 { return c.cost }
+
+// State returns the last state text sent to the model.
+func (c *Client) State() string { return c.state }
+
+// Exchanges returns the recorded round trips, in order.
+func (c *Client) Exchanges() []Exchange { return c.exchanges }
 
 // Decide answers every keyed question, batching to stay under the request token
 // limit and splitting batches on max_tokens_exceeded.
 func (c *Client) Decide(ctx context.Context, state string, qs []Question) (map[string]float64, error) {
 	answers := map[string]float64{}
-
-	if c.verbose != nil {
-		c.logf("state (%d chars):\n%s", len(state), state)
-
-		for _, q := range qs {
-			c.logf("question %q:\n%s", q.Key, q.Instructions)
-		}
-	}
+	c.state = state
 
 	// ponytail: sequential batches; add a bounded worker pool if wall time matters
 	for _, b := range batch(state, qs) {
@@ -149,21 +156,14 @@ func batch(state string, qs []Question) [][]Question {
 }
 
 func (c *Client) decideBatch(ctx context.Context, state string, batch []Question, out map[string]float64) error {
-	keys := make([]string, 0, len(batch))
-	for _, q := range batch {
-		keys = append(keys, q.Key)
-	}
-
-	c.logf("POST %s model=%s state=%d chars questions=%d %v", c.endpoint, c.model, len(state), len(batch), keys)
-
 	body, code, err := c.post(ctx, state, batch)
 	if err != nil {
 		return err
 	}
 
-	if code == http.StatusBadRequest && strings.Contains(string(body), "max_tokens_exceeded") {
-		c.logf("HTTP 400 max_tokens_exceeded — splitting batch of %d", len(batch))
+	ex := c.record(state, batch, code, body)
 
+	if code == http.StatusBadRequest && strings.Contains(string(body), "max_tokens_exceeded") {
 		return c.splitAndRetry(ctx, state, batch, out)
 	}
 
@@ -171,9 +171,7 @@ func (c *Client) decideBatch(ctx context.Context, state string, batch []Question
 		return fmt.Errorf("decisions HTTP %d: %s", code, body)
 	}
 
-	c.logf("HTTP %d: %s", code, strings.TrimSpace(string(body)))
-
-	return c.collect(body, batch, out)
+	return c.collect(body, batch, out, ex)
 }
 
 // splitAndRetry halves an over-limit batch and retries each half.
@@ -188,6 +186,29 @@ func (c *Client) splitAndRetry(ctx context.Context, state string, batch []Questi
 	}
 
 	return c.decideBatch(ctx, state, batch[mid:], out)
+}
+
+// record appends one exchange for a round trip and returns it.
+func (c *Client) record(state string, batch []Question, code int, body []byte) *Exchange {
+	keys := make([]string, 0, len(batch))
+	instr := make(map[string]string, len(batch))
+
+	for _, q := range batch {
+		keys = append(keys, q.Key)
+		instr[q.Key] = q.Instructions
+	}
+
+	c.exchanges = append(c.exchanges, Exchange{
+		Endpoint:     c.endpoint,
+		Model:        c.model,
+		StateChars:   len(state),
+		QuestionKeys: keys,
+		Instructions: instr,
+		Status:       code,
+		RawResponse:  strings.TrimSpace(string(body)),
+	})
+
+	return &c.exchanges[len(c.exchanges)-1]
 }
 
 // post sends one batch and returns the body and status code.
@@ -225,8 +246,9 @@ func (c *Client) post(ctx context.Context, state string, batch []Question) (body
 	return body, resp.StatusCode, nil
 }
 
-// collect records each answer, defaulting a missing key to run.
-func (c *Client) collect(body []byte, batch []Question, out map[string]float64) error {
+// collect records each answer into out and the exchange, defaulting a missing
+// key to run.
+func (c *Client) collect(body []byte, batch []Question, out map[string]float64, ex *Exchange) error {
 	var r response
 	if err := json.Unmarshal(body, &r); err != nil {
 		return fmt.Errorf("decode decisions response: %w", err)
@@ -234,21 +256,27 @@ func (c *Client) collect(body []byte, batch []Question, out map[string]float64) 
 
 	c.cost += r.Usage.Cost
 
-	c.logf("model=%s provider=%s id=%s tokens in/out=%d/%d cost=$%.6f",
-		r.Model, r.Provider, r.ID, r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.Cost)
+	ex.AnswerModel = r.Model
+	ex.Provider = r.Provider
+	ex.ID = r.ID
+	ex.InputTokens = r.Usage.InputTokens
+	ex.OutputTokens = r.Usage.OutputTokens
+	ex.Cost = r.Usage.Cost
+	ex.Answers = make(map[string]float64, len(batch))
 
 	for _, q := range batch {
 		a, ok := r.Answers[q.Key]
 		if !ok {
 			fmt.Fprintf(os.Stderr, "warning: no answer for %s, running it\n", q.Key)
-			c.logf("  %-40s <missing> -> 1.00 (default: run)", q.Key)
 
+			ex.Missing = append(ex.Missing, q.Key)
+			ex.Answers[q.Key] = 1.0
 			out[q.Key] = 1.0
 
 			continue
 		}
 
-		c.logf("  %-40s noul=%.4f", q.Key, a.Noul)
+		ex.Answers[q.Key] = a.Noul
 		out[q.Key] = a.Noul
 	}
 

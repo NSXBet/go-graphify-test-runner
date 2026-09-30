@@ -67,7 +67,7 @@ func TestRunSelectsExactTest(t *testing.T) {
 	t.Setenv("MARKER", marker)
 
 	// Only TestAdd: the -run pattern must not drag in TestOther.
-	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, nil, false)
+	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, nil, false, nil)
 	if code != 0 {
 		t.Fatalf("Run code = %d want 0", code)
 	}
@@ -90,7 +90,7 @@ func TestRunGroupsByDirectory(t *testing.T) {
 	code := Run(ctx, dir, map[string][]string{
 		"pkg/alpha": {"TestAdd"},
 		"pkg/beta":  {"TestGreet"},
-	}, nil, false)
+	}, nil, false, nil)
 	if code != 0 {
 		t.Fatalf("Run code = %d want 0", code)
 	}
@@ -102,7 +102,7 @@ func TestRunReportsFailure(t *testing.T) {
 
 	writeFile(t, dir, "pkg/beta/beta_test.go", "package beta\n\nimport \"testing\"\n\nfunc TestGreet(t *testing.T) { t.Fatal(\"boom\") }\n")
 
-	code := Run(ctx, dir, map[string][]string{"pkg/beta": {"TestGreet"}}, nil, false)
+	code := Run(ctx, dir, map[string][]string{"pkg/beta": {"TestGreet"}}, nil, false, nil)
 	if code != 1 {
 		t.Fatalf("Run code = %d want 1 on failing test", code)
 	}
@@ -119,7 +119,7 @@ func TestRunFindsNestedModuleRoot(t *testing.T) {
 	writeFile(t, dir, "nested/p/x.go", "package p\n\nfunc F() int { return 1 }\n")
 	writeFile(t, dir, "nested/p/x_test.go", "package p\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {}\n")
 
-	code := Run(ctx, dir, map[string][]string{"nested/p": {"TestF"}}, nil, false)
+	code := Run(ctx, dir, map[string][]string{"nested/p": {"TestF"}}, nil, false, nil)
 	if code != 0 {
 		t.Fatalf("Run code = %d want 0", code)
 	}
@@ -140,14 +140,14 @@ func TestRunForwardsExtraGoTestArgs(t *testing.T) {
 	// A test that fails unless -run reached go test with our args. -v writes
 	// "=== RUN" to the run output; use -count=1 to defeat the cache and prove
 	// the arg was honoured rather than short-circuited.
-	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-count=1"}, false)
+	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-count=1"}, false, nil)
 	if code != 0 {
 		t.Fatalf("Run with extra args code = %d want 0", code)
 	}
 
 	// An invalid flag forwarded through must reach go test and make it fail —
 	// proof the args are not silently dropped.
-	if code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-this-flag-does-not-exist"}, false); code == 0 {
+	if code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-this-flag-does-not-exist"}, false, nil); code == 0 {
 		t.Fatal("Run swallowed an invalid go test flag")
 	}
 }
@@ -166,7 +166,7 @@ func TestRunDryRunPrintsForwardedArgs(t *testing.T) {
 	old := os.Stdout
 	os.Stdout = w
 
-	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-race", "-count=1"}, true)
+	code := Run(ctx, dir, map[string][]string{"pkg/alpha": {"TestAdd"}}, []string{"-race", "-count=1"}, true, nil)
 
 	os.Stdout = old
 

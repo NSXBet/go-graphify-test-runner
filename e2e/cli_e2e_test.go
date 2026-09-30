@@ -217,3 +217,69 @@ func TestCLIMissingKey(t *testing.T) {
 		t.Fatalf("exit code = %v want 2", err)
 	}
 }
+
+// TestCLIJSONIsPureAndComplete proves --json emits a parseable document on
+// stdout covering the rounds and the selection — even when selected tests run
+// and write to stderr.
+func TestCLIJSONIsPureAndComplete(t *testing.T) {
+	bin := buildBinary(t)
+	srv := stubDecisions(t)
+
+	dir, base := fixture(t)
+
+	write(t, dir, "pkg/alpha/alpha.go", "package alpha\n\nfunc Add(a, b int) int { return a + b + 0 }\n")
+
+	// Threshold below every score so both rounds select, forcing the real run.
+	cmd := exec.Command(bin, "--repo", dir, "--base", base, "--json", "--endpoint", srv.URL)
+	cmd.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
+
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var doc struct {
+		MergeBase    string `json:"merge_base"`
+		ChangedFiles []string
+		Rounds       []struct {
+			Name     string
+			Selected []string
+		}
+		Cost     float64 `json:"cost_usd"`
+		Selected map[string][]string
+		Judging  []any
+	}
+
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("stdout is not clean JSON: %v\n%s", err, out)
+	}
+
+	if doc.MergeBase == "" || len(doc.Rounds) != 2 {
+		t.Fatalf("incomplete document: %+v", doc)
+	}
+
+	if len(doc.Selected["pkg/alpha"]) == 0 {
+		t.Fatalf("selection missing: %+v", doc.Selected)
+	}
+
+	if doc.Judging != nil {
+		t.Fatalf("judging present without --verbose: %+v", doc.Judging)
+	}
+
+	// With --verbose the judging block must appear.
+	verbose := exec.Command(bin, "--repo", dir, "--base", base, "--json", "--verbose", "--endpoint", srv.URL)
+	verbose.Env = append(os.Environ(), "OPENROUTER_API_KEY=test")
+
+	vout, err := verbose.Output()
+	if err != nil {
+		t.Fatalf("verbose run: %v", err)
+	}
+
+	if err := json.Unmarshal(vout, &doc); err != nil {
+		t.Fatalf("verbose stdout is not clean JSON: %v\n%s", err, vout)
+	}
+
+	if len(doc.Judging) == 0 {
+		t.Fatal("judging missing with --verbose")
+	}
+}

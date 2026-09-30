@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,9 +143,15 @@ func ModuleRoot(root, dir string) string {
 	return root
 }
 
-// Run runs the selected tests grouped by package directory. It returns the
-// process exit code (0 ok, 1 any failure).
-func Run(ctx context.Context, root string, selected map[string][]string, extra []string, dryRun bool) int {
+// Run runs the selected tests grouped by package directory. Command lines and
+// subprocess output are written to out (os.Stdout in normal use; os.Stderr when
+// --json reserves stdout for the JSON document). It returns the process exit
+// code (0 ok, 1 any failure).
+func Run(ctx context.Context, root string, selected map[string][]string, extra []string, dryRun bool, out io.Writer) int {
+	if out == nil {
+		out = os.Stdout
+	}
+
 	dirs := make([]string, 0, len(selected))
 	for d := range selected {
 		dirs = append(dirs, d)
@@ -155,7 +162,7 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 	code := 0
 
 	for _, dir := range dirs {
-		if !runDir(ctx, root, dir, selected[dir], extra, dryRun) {
+		if !runDir(ctx, root, dir, selected[dir], extra, dryRun, out) {
 			code = 1
 		}
 	}
@@ -164,7 +171,7 @@ func Run(ctx context.Context, root string, selected map[string][]string, extra [
 }
 
 // runDir runs one package's selected tests; returns false on failure.
-func runDir(ctx context.Context, root, dir string, names, extra []string, dryRun bool) bool {
+func runDir(ctx context.Context, root, dir string, names, extra []string, dryRun bool, out io.Writer) bool {
 	names = append([]string(nil), names...)
 	sort.Strings(names)
 
@@ -183,14 +190,14 @@ func runDir(ctx context.Context, root, dir string, names, extra []string, dryRun
 	args = append(args, "-run", run, pattern)
 
 	if dryRun {
-		fmt.Fprintln(os.Stdout, "go "+strings.Join(args, " "))
+		fmt.Fprintln(out, "go "+strings.Join(args, " "))
 
 		return true
 	}
 
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = m
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = out
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {

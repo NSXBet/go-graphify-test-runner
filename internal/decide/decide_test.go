@@ -1,7 +1,6 @@
 package decide
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -149,48 +148,78 @@ func TestBatchSingleQuestionAlwaysFits(t *testing.T) {
 	}
 }
 
-func TestVerboseAuditTrail(t *testing.T) {
+func TestExchangesRecorded(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if err := json.NewEncoder(w).Encode(map[string]any{
+			"id":       "gen-1",
 			"model":    "typesafe/jev-test",
 			"provider": "TypeSafe",
 			"answers":  map[string]map[string]float64{"k1": {"noul": 0.42}},
-			"usage":    map[string]float64{"cost": 0.001},
+			"usage":    map[string]float64{"cost": 0.001, "input_tokens": 10, "output_tokens": 2},
 		}); err != nil {
 			t.Errorf("encode: %v", err)
 		}
 	}))
 	defer srv.Close()
 
-	var buf bytes.Buffer
-
 	c := NewClient(srv.URL, "key", "jev-latest")
-	c.SetVerbose(&buf)
 
 	if _, err := c.Decide(context.Background(), "THE-STATE", []Question{{Key: "k1", Instructions: "INSTR"}}); err != nil {
 		t.Fatal(err)
 	}
 
-	out := buf.String()
-	for _, want := range []string{"[decide]", "THE-STATE", "INSTR", "POST", "noul=0.4200", "provider=TypeSafe"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("verbose output missing %q:\n%s", want, out)
-		}
+	if c.State() != "THE-STATE" {
+		t.Fatalf("State() = %q", c.State())
+	}
+
+	ex := c.Exchanges()
+	if len(ex) != 1 {
+		t.Fatalf("exchanges = %d want 1", len(ex))
+	}
+
+	e := ex[0]
+	if e.Status != 200 || e.Provider != "TypeSafe" || e.ID != "gen-1" {
+		t.Fatalf("exchange metadata wrong: %+v", e)
+	}
+
+	if e.Answers["k1"] != 0.42 {
+		t.Fatalf("exchange answers = %v", e.Answers)
+	}
+
+	if e.Instructions["k1"] != "INSTR" {
+		t.Fatalf("exchange instructions = %v", e.Instructions)
+	}
+
+	if !strings.Contains(e.RawResponse, "noul") {
+		t.Fatalf("raw response not captured: %q", e.RawResponse)
+	}
+
+	if e.Cost != 0.001 {
+		t.Fatalf("exchange cost = %v", e.Cost)
 	}
 }
 
-func TestVerboseOffByDefault(t *testing.T) {
+func TestExchangesRecordMissingAnswer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if err := json.NewEncoder(w).Encode(map[string]any{"answers": map[string]map[string]float64{"k1": {"noul": 0.1}}}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"answers": map[string]map[string]float64{}}); err != nil {
 			t.Errorf("encode: %v", err)
 		}
 	}))
 	defer srv.Close()
 
-	// No SetVerbose: the audit trail must stay silent.
 	c := NewClient(srv.URL, "key", "jev-latest")
 
-	if _, err := c.Decide(context.Background(), "state", []Question{{Key: "k1"}}); err != nil {
+	got, err := c.Decide(context.Background(), "state", []Question{{Key: "missing"}})
+	if err != nil {
 		t.Fatal(err)
+	}
+
+	if got["missing"] != 1.0 {
+		t.Fatalf("missing answer = %v want 1.0", got["missing"])
+	}
+
+	ex := c.Exchanges()
+	if len(ex) != 1 || len(ex[0].Missing) != 1 || ex[0].Missing[0] != "missing" {
+		t.Fatalf("missing not recorded: %+v", ex)
 	}
 }

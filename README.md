@@ -21,6 +21,8 @@ graphify-test-runner                       # diff vs origin/main
 graphify-test-runner --base main           # diff vs a local branch
 graphify-test-runner --dry-run             # print the selection, don't run
 graphify-test-runner --verbose             # stream the model exchange for auditing
+graphify-test-runner --json                # machine-readable result on stdout
+graphify-test-runner --json --verbose      # ... including the judging
 graphify-test-runner -- -race -count=1     # everything after -- goes to go test
 ```
 
@@ -33,16 +35,41 @@ graphify-test-runner -- -race -count=1     # everything after -- goes to go test
 | `--endpoint` | OpenRouter `alpha/decisions` | decisions endpoint |
 | `--dry-run` | `false` | print selection and `go test` commands, do not run |
 | `--verbose` | `false` | print the full decisioning exchange to stderr |
+| `--json` | `false` | emit the whole result as JSON on stdout |
 
 Anything after `--` is forwarded verbatim to `go test`, so all `go test` flags
-keep working (`-- -race -count=1 -v`, `-- -run` is managed by the tool).
+keep working (`-- -race -count=1 -v`; `-run` is managed by the tool).
 
 ### `--verbose` — auditing the decision
 
-`--verbose` writes the whole exchange with the decision model to **stderr**,
-so the selection is auditable: the shared state text, every question and its
-instructions, each HTTP `POST`, the raw JSON response, and the parsed `noul`
-per question. Normal progress and the final report stay on **stdout**.
+`--verbose` writes the whole exchange with the decision model to **stderr**:
+the state text, every question and its instructions, each HTTP `POST`, the raw
+JSON response, and the parsed `noul` per question. Normal progress and the
+final report stay on **stdout**.
+
+### `--json` — machine-readable result
+
+`--json` writes one JSON document to **stdout** — the merge-base, changed
+files, both rounds (scores and what each selected), the cost, and the final
+selection grouped by package:
+
+```json
+{
+  "merge_base": "dc54a1ab08a8",
+  "changed_files": ["p/a.go"],
+  "state_chars": 313,
+  "rounds": [
+    {"name": "round 1 (files)", "threshold": 0.5, "scores": {"p/a_test.go": 0.9}, "selected": ["p/a_test.go"]}
+  ],
+  "cost_usd": 0.0000378,
+  "selected": {"p": ["TestA"]}
+}
+```
+
+With `--verbose` the document gains a `judging` array holding each exchange
+(`status`, `raw_response`, `question_keys`, `instructions`, `answers`, token
+counts). When `--json` is on, `go test` output is diverted to **stderr**, so
+stdout stays a parseable document.
 
 ## Development
 
