@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: graphify-test-runner
-    main: .
+    main: ./cmd/graphify-test-runner
     binary: graphify-test-runner
     env:
       - CGO_ENABLED=0

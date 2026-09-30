@@ -21,8 +21,10 @@ func newStubReleaseAPI(t *testing.T, tag string) string {
 	return srv.URL
 }
 
-// TestCLIVersionSubcommand proves the assembled binary reports a version —
-// "dev" for a plain local build — and that --version agrees.
+// TestCLIVersionSubcommand proves the assembled binary reports a version and
+// that --version agrees. It does not assert a specific value: a plain build in
+// an untagged checkout says "dev", one in a tagged checkout reports the tag —
+// both are correct, and the test must hold in either repo state.
 func TestCLIVersionSubcommand(t *testing.T) {
 	bin := buildBinary(t)
 
@@ -34,11 +36,6 @@ func TestCLIVersionSubcommand(t *testing.T) {
 	got := strings.TrimSpace(stdout)
 	if got == "" {
 		t.Fatal("version subcommand printed nothing")
-	}
-
-	// A local `go build` has no injected version, so it must say "dev".
-	if got != "dev" {
-		t.Fatalf("version = %q want dev for a local build", got)
 	}
 
 	fout, _, fcode := runCLI(t, bin, nil, "--version")

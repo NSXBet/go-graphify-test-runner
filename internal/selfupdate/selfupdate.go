@@ -19,8 +19,14 @@ import (
 // Repo is the GitHub repository releases are published to.
 const Repo = "NSXBet/go-graphify-test-runner"
 
-// ModulePath is the module to reinstall for the `go install` upgrade path.
-const ModulePath = "github.com/NSXBet/go-graphify-test-runner"
+// ModuleRoot is the repository's module path.
+const ModuleRoot = "github.com/NSXBet/go-graphify-test-runner"
+
+// InstallPath is the package `go install` fetches for the upgrade path. It is
+// the main package under cmd/, so the installed binary is named
+// `graphify-test-runner` (the toolchain names a binary after the import path's
+// last element).
+const InstallPath = ModuleRoot + "/cmd/graphify-test-runner"
 
 // Tap is the Homebrew tap that publishes the formula.
 const Tap = "NSXBet/tap"
@@ -204,7 +210,7 @@ func Upgrade(ctx context.Context, tag string) (used Method, output string, err e
 	return MethodGoInstall, out, gerr
 }
 
-// goInstall reinstalls ModulePath at tag via `go install`.
+// goInstall reinstalls InstallPath at tag via `go install`.
 func goInstall(ctx context.Context, tag string) (string, error) {
 	if !validTag(tag) {
 		return "", fmt.Errorf("refusing to install invalid tag %q", tag)
@@ -214,11 +220,11 @@ func goInstall(ctx context.Context, tag string) (string, error) {
 		return "", errors.New("go toolchain not found in PATH (install it, or re-run install.sh)")
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "install", ModulePath+"@"+tag) //nolint:gosec // tag is validated by validTag
+	cmd := exec.CommandContext(ctx, "go", "install", InstallPath+"@"+tag) //nolint:gosec // tag is validated by validTag
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("go install %s@%s failed: %w", ModulePath, tag, err)
+		return string(out), fmt.Errorf("go install %s@%s failed: %w", InstallPath, tag, err)
 	}
 
 	return string(out), nil

@@ -35,12 +35,15 @@ should take the `.zip` from the [releases page](https://github.com/NSXBet/go-gra
 ### `go install`
 
 ```bash
-go install github.com/NSXBet/go-graphify-test-runner@latest
+go install github.com/NSXBet/go-graphify-test-runner/cmd/graphify-test-runner@latest
 ```
 
-`@latest` resolves to the highest release tag, and the Go toolchain embeds that
-tag in the binary, so `graphify-test-runner version` reports the real version —
-no extra step needed.
+The main package lives under `cmd/graphify-test-runner/`, so the toolchain names
+the binary `graphify-test-runner` (a binary is named after the last element of
+its import path — installing the module root would produce
+`go-graphify-test-runner`). `@latest` resolves to the highest release tag, and
+the Go toolchain embeds that tag in the binary, so `graphify-test-runner version`
+reports the real version — no extra step needed.
 
 Either way, `graphify` must be on `PATH` and `OPENROUTER_API_KEY` set.
 
@@ -63,7 +66,7 @@ exists and prints a one-line hint to stderr:
 ```
 A new version of graphify-test-runner is available: v1.2.0 (you have v1.1.0)
 Update with:  graphify-test-runner upgrade
-         or:  go install github.com/NSXBet/go-graphify-test-runner@v1.2.0
+         or:  go install github.com/NSXBet/go-graphify-test-runner/cmd/graphify-test-runner@v1.2.0
 ```
 
 ```bash

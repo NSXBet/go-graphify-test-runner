@@ -57,7 +57,7 @@ func buildBinary(t *testing.T) string {
 
 	bin := filepath.Join(t.TempDir(), "gtr")
 
-	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "github.com/NSXBet/go-graphify-test-runner")
+	cmd := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "./cmd/graphify-test-runner")
 	cmd.Dir = repoRoot(t)
 
 	if out, err := cmd.CombinedOutput(); err != nil {

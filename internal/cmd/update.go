@@ -24,7 +24,7 @@ func updateHint(current, latest string) string {
 	if selfupdate.DetectMethod() == selfupdate.MethodBrew {
 		how = "brew upgrade " + selfupdate.Formula
 	} else {
-		how += fmt.Sprintf("\n         or:  go install %s@%s", selfupdate.ModulePath, latest)
+		how += fmt.Sprintf("\n         or:  go install %s@%s", selfupdate.InstallPath, latest)
 	}
 
 	return fmt.Sprintf(
