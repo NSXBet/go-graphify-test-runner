@@ -22,6 +22,12 @@ const Repo = "NSXBet/go-graphify-test-runner"
 // ModulePath is the module to reinstall for the `go install` upgrade path.
 const ModulePath = "github.com/NSXBet/go-graphify-test-runner"
 
+// Tap is the Homebrew tap that publishes the formula.
+const Tap = "NSXBet/tap"
+
+// Formula is the Homebrew formula name (`brew install NSXBet/tap/graphify-test-runner`).
+const Formula = "graphify-test-runner"
+
 // DefaultAPIBase is the GitHub API root; the /releases/latest endpoint returns
 // the newest non-prerelease release.
 const DefaultAPIBase = "https://api.github.com"
@@ -182,9 +188,24 @@ func validTag(tag string) bool {
 	return true
 }
 
-// Upgrade reinstalls the binary at the given tag via `go install`. It returns
-// the output of the install command for reporting.
-func Upgrade(ctx context.Context, tag string) (string, error) {
+// Upgrade refreshes the binary to the given tag, choosing the mechanism that
+// matches how it was installed: Homebrew-managed binaries use `brew upgrade`;
+// everything else reinstalls via `go install`. It returns the method used and
+// the combined command output for reporting.
+func Upgrade(ctx context.Context, tag string) (used Method, output string, err error) {
+	if DetectMethod() == MethodBrew {
+		out, berr := brewUpgrade(ctx)
+
+		return MethodBrew, out, berr
+	}
+
+	out, gerr := goInstall(ctx, tag)
+
+	return MethodGoInstall, out, gerr
+}
+
+// goInstall reinstalls ModulePath at tag via `go install`.
+func goInstall(ctx context.Context, tag string) (string, error) {
 	if !validTag(tag) {
 		return "", fmt.Errorf("refusing to install invalid tag %q", tag)
 	}
@@ -198,6 +219,22 @@ func Upgrade(ctx context.Context, tag string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("go install %s@%s failed: %w", ModulePath, tag, err)
+	}
+
+	return string(out), nil
+}
+
+// brewUpgrade updates a Homebrew-managed install.
+func brewUpgrade(ctx context.Context) (string, error) {
+	if _, err := exec.LookPath("brew"); err != nil {
+		return "", errors.New("brew not found in PATH (this binary was installed with Homebrew)")
+	}
+
+	cmd := exec.CommandContext(ctx, "brew", "upgrade", Formula)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("brew upgrade %s failed: %w", Formula, err)
 	}
 
 	return string(out), nil

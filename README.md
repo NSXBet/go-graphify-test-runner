@@ -8,6 +8,17 @@ via `go test -run`.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install NSXBet/tap/graphify-test-runner
+```
+
+Homebrew-managed installs update with `brew upgrade graphify-test-runner` — the
+tool detects a Homebrew install (Cellar/Caskroom path) and tells you so. Formula
+is published to [`NSXBet/homebrew-tap`](https://github.com/NSXBet/homebrew-tap)
+by the release workflow.
+
 ### Install script (macOS / Linux)
 
 ```bash
@@ -61,12 +72,15 @@ graphify-test-runner upgrade        # reinstall the latest release via go instal
 
 - The check never blocks a run: it is best-effort, time-boxed, and any failure
   is silent.
+- `upgrade` picks the right mechanism for how the binary was installed:
+  Homebrew installs (a Cellar/Caskroom path) run `brew upgrade`; everything else
+  reinstalls via `go install`. The install script's `INSTALL_DIR` is honoured by
+  re-running the script.
 - Suppress it with `--no-update-check` or `GRAPHIFY_TEST_RUNNER_NO_UPDATE_CHECK=1`.
 - It is skipped automatically for `--json` (so stdout stays a clean document)
   and for `version`/`help`.
 - `GRAPHIFY_TEST_RUNNER_UPDATE_API` overrides the release API root (mirrors).
-- `upgrade` validates the tag before shelling out to `go install`; installs from
-  the `install.sh` path are updated by re-running the script instead.
+- `upgrade` validates the tag before shelling out to `go install`.
 
 ## Releases
 

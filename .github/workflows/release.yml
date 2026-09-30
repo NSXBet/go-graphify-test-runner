@@ -40,3 +40,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fine-grained PAT with contents:write on NSXBet/homebrew-tap, so
+          # goreleaser can push the formula. Without it, the GitHub release is
+          # still published but no tap update is attempted.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

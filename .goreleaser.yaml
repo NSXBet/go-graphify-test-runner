@@ -56,3 +56,30 @@ release:
   # goreleaser publishes the GitHub release for a pushed tag.
   draft: false
   prerelease: auto
+
+homebrew_casks:
+  - name: graphify-test-runner
+    binaries:
+      - graphify-test-runner
+    homepage: "https://github.com/NSXBet/go-graphify-test-runner"
+    description: "Select and run only the Go tests a change can affect"
+    repository:
+      owner: NSXBet
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    commit_author:
+      name: nsx-bot
+      email: nsx-bot@users.noreply.github.com
+    commit_msg_template: "graphify-test-runner {{ .Version }}"
+    # Do not publish a cask for a pre-release (v1.2.3-rc1): it would become the
+    # "latest" brew install for a build the stable channel should not serve.
+    skip_upload: "{{ with .Prerelease }}true{{ end }}"
+    # The binary is unsigned; Homebrew would quarantine it on first run.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/graphify-test-runner"]
+          end

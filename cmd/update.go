@@ -16,13 +16,20 @@ import (
 // updateCheckTimeout bounds the pre-run version check.
 const updateCheckTimeout = 3 * time.Second
 
-// updateCommand is the printed update hint, kept in one place.
+// updateHint is the printed update hint, kept in one place and tailored to how
+// the binary was installed.
 func updateHint(current, latest string) string {
+	how := "graphify-test-runner upgrade"
+
+	if selfupdate.DetectMethod() == selfupdate.MethodBrew {
+		how = "brew upgrade " + selfupdate.Formula
+	} else {
+		how += fmt.Sprintf("\n         or:  go install %s@%s", selfupdate.ModulePath, latest)
+	}
+
 	return fmt.Sprintf(
-		"A new version of graphify-test-runner is available: %s (you have %s)\n"+
-			"Update with:  graphify-test-runner upgrade\n"+
-			"         or:  go install %s@%s",
-		latest, current, selfupdate.ModulePath, latest,
+		"A new version of graphify-test-runner is available: %s (you have %s)\nUpdate with:  %s",
+		latest, current, how,
 	)
 }
 
@@ -81,7 +88,7 @@ func newUpgradeCmd() *cobra.Command {
 
 			fmt.Fprintf(cmd.OutOrStdout(), "Updating %s -> %s ...\n", current, latest)
 
-			out, err := selfupdate.Upgrade(ctx, latest)
+			used, out, err := selfupdate.Upgrade(ctx, latest)
 			if err != nil {
 				return err
 			}
@@ -90,7 +97,7 @@ func newUpgradeCmd() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), out)
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Updated to %s. Re-run to use it.\n", latest)
+			fmt.Fprintf(cmd.OutOrStdout(), "Updated to %s via %s. Re-run to use it.\n", latest, used)
 
 			return nil
 		},
